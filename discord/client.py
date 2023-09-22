@@ -1029,6 +1029,28 @@ class Client:
         """
         return self._connection._get_guild(id)
 
+    def get_member(self, guild_id: int, user_id: int) -> Optional[Member]:
+        """Returns a member with the given IDs.
+
+        .. versionadded:: 2.5
+
+        Parameters
+        -----------
+        guild_id: :class:`int`
+            The guild ID to search in.
+        user_id: :class:`int`
+            The user ID to search for.        
+
+        Returns
+        --------
+        Optional[:class:`.Member`]
+            The member or ``None`` if not found.
+        """
+        if guild := self._connection._get_guild(guild_id):
+            return guild._members.get(user_id)
+
+        return None
+
     def get_user(self, id: int, /) -> Optional[User]:
         """Returns a user with the given ID.
 
