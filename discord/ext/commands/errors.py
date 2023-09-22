@@ -104,6 +104,7 @@ __all__ = (
     'MissingRequiredFlag',
     'HybridCommandError',
     'RangeError',
+    "NotAvailableInGuild",
 )
 
 
@@ -865,6 +866,23 @@ class BotMissingPermissions(CheckFailure):
         message = f'Bot requires {fmt} permission(s) to run this command.'
         super().__init__(message, *args)
 
+
+class NotAvailableInGuild(CheckFailure):
+    """Exception raised when the command is not available in a guild.
+
+    This inherits from :exc:`CheckFailure`
+
+    .. versionadded:: 2.5
+
+    Attributes
+    -----------
+    guild_id: :class:`int`
+        The guild ID that the command is not available in.
+    """
+
+    def __init__(self, guild_id: int) -> None:
+        self.guild_id: int = guild_id
+        super().__init__(f'This command is not available in guild {guild_id}')
 
 class BadUnionArgument(UserInputError):
     """Exception raised when a :data:`typing.Union` converter fails for all

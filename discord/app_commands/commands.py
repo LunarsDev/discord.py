@@ -88,6 +88,7 @@ __all__ = (
     'guilds',
     'guild_only',
     'default_permissions',
+    "guilds",
 )
 
 if TYPE_CHECKING:
