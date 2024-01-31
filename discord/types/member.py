@@ -22,7 +22,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
 
-from typing import Optional, TypedDict
+from typing import Literal, Optional, TypedDict
 from .snowflake import SnowflakeList
 from .user import User, AvatarDecorationData
 from typing_extensions import NotRequired
@@ -59,6 +59,7 @@ class _OptionalMemberWithUser(PartialMember, total=False):
     permissions: str
     communication_disabled_until: str
     avatar_decoration_data: NotRequired[AvatarDecorationData]
+    premium_type: Literal[0, 1, 2]
 
 
 class MemberWithUser(_OptionalMemberWithUser):

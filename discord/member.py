@@ -28,7 +28,7 @@ import datetime
 import inspect
 import itertools
 from operator import attrgetter
-from typing import Any, Awaitable, Callable, Collection, Dict, List, Optional, TYPE_CHECKING, Tuple, TypeVar, Union
+from typing import Any, Awaitable, Callable, Collection, Dict, List, Literal, Optional, TYPE_CHECKING, Tuple, TypeVar, Union
 
 import discord.abc
 
@@ -38,7 +38,7 @@ from .utils import MISSING
 from .user import BaseUser, User, _UserTag
 from .activity import create_activity, ActivityTypes
 from .permissions import Permissions
-from .enums import Status, try_enum
+from .enums import PremiumType, Status, try_enum
 from .errors import ClientException
 from .colour import Colour
 from .object import Object
@@ -324,6 +324,7 @@ class Member(discord.abc.Messageable, _UserTag):
         '_avatar',
         '_flags',
         '_avatar_decoration_data',
+        '_premium_type',
     )
 
     if TYPE_CHECKING:
@@ -345,6 +346,7 @@ class Member(discord.abc.Messageable, _UserTag):
         accent_colour: Optional[Colour]
         avatar_decoration: Optional[Asset]
         avatar_decoration_sku_id: Optional[int]
+        premium_type: PremiumType
 
     def __init__(self, *, data: MemberWithUserPayload, guild: Guild, state: ConnectionState):
         self._state: ConnectionState = state
@@ -361,6 +363,7 @@ class Member(discord.abc.Messageable, _UserTag):
         self._permissions: Optional[int]
         self._flags: int = data['flags']
         self._avatar_decoration_data: Optional[AvatarDecorationData] = data.get('avatar_decoration_data')
+        self._premium_type: Optional[Literal[0,1,2]] = data.get('_premium_type')
         try:
             self._permissions = int(data['permissions'])
         except KeyError:
@@ -400,6 +403,7 @@ class Member(discord.abc.Messageable, _UserTag):
         self.pending = data.get('pending', False)
         self.timed_out_until = utils.parse_time(data.get('communication_disabled_until'))
         self._flags = data.get('flags', 0)
+        self._premium_type = data.get('premium_type')
 
     @classmethod
     def _try_upgrade(cls, *, data: UserWithMemberPayload, guild: Guild, state: ConnectionState) -> Union[User, Self]:
@@ -430,6 +434,7 @@ class Member(discord.abc.Messageable, _UserTag):
         self._state = member._state
         self._avatar = member._avatar
         self._avatar_decoration_data = member._avatar_decoration_data
+        self._premium_type = member._premium_type
 
         # Reference will not be copied unless necessary by PRESENCE_UPDATE
         # See below
@@ -459,6 +464,7 @@ class Member(discord.abc.Messageable, _UserTag):
         self._avatar = data.get('avatar')
         self._flags = data.get('flags', 0)
         self._avatar_decoration_data = data.get('avatar_decoration_data')
+        self._premium_type = data.get('premium_type')
 
     def _presence_update(self, data: PartialPresenceUpdate, user: UserPayload) -> Optional[Tuple[User, User]]:
         self.activities = tuple(create_activity(d, self._state) for d in data['activities'])
@@ -477,6 +483,7 @@ class Member(discord.abc.Messageable, _UserTag):
             u.global_name,
             u._public_flags,
             u._avatar_decoration_data['sku_id'] if u._avatar_decoration_data is not None else None,
+            u._premium_type,
         )
 
         decoration_payload = user.get('avatar_decoration_data')
@@ -488,16 +495,18 @@ class Member(discord.abc.Messageable, _UserTag):
             user.get('global_name'),
             user.get('public_flags', 0),
             decoration_payload['sku_id'] if decoration_payload is not None else None,
+            user.get('premium_type'),
         )
         if original != modified:
             to_return = User._copy(self._user)
-            u.name, u.discriminator, u._avatar, u.global_name, u._public_flags, u._avatar_decoration_data = (
+            u.name, u.discriminator, u._avatar, u.global_name, u._public_flags, u._avatar_decoration_data, u._premium_type = (
                 user['username'],
                 user['discriminator'],
                 user['avatar'],
                 user.get('global_name'),
                 user.get('public_flags', 0),
                 decoration_payload,
+                user.get('premium_type'),
             )
             # Signal to dispatch on_user_update
             return to_return, u

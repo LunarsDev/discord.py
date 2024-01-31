@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 import discord.abc
 from .asset import Asset
 from .colour import Colour
-from .enums import DefaultAvatar
+from .enums import DefaultAvatar, PremiumType, try_enum
 from .flags import PublicUserFlags
 from .utils import snowflake_time, _bytes_to_base64_data, MISSING, _get_as_snowflake
 
@@ -71,6 +71,7 @@ class BaseUser(_UserTag):
         '_public_flags',
         '_state',
         '_avatar_decoration_data',
+        '_premium_type',
     )
 
     if TYPE_CHECKING:
@@ -80,6 +81,7 @@ class BaseUser(_UserTag):
         global_name: Optional[str]
         bot: bool
         system: bool
+        _premium_type: Optional[int]
         _state: ConnectionState
         _avatar: Optional[str]
         _banner: Optional[str]
@@ -123,6 +125,7 @@ class BaseUser(_UserTag):
         self.bot = data.get('bot', False)
         self.system = data.get('system', False)
         self._avatar_decoration_data = data.get('avatar_decoration_data')
+        self._premium_type = data.get('premium_type')
 
     @classmethod
     def _copy(cls, user: Self) -> Self:
@@ -139,6 +142,7 @@ class BaseUser(_UserTag):
         self._state = user._state
         self._public_flags = user._public_flags
         self._avatar_decoration_data = user._avatar_decoration_data
+        self._premium_type = user._premium_type
 
         return self
 
@@ -150,6 +154,7 @@ class BaseUser(_UserTag):
             'discriminator': self.discriminator,
             'global_name': self.global_name,
             'bot': self.bot,
+            'premium_type': self._premium_type,
         }
 
     @property
@@ -533,6 +538,23 @@ class User(BaseUser, discord.abc.Messageable):
         .. versionadded:: 1.7
         """
         return [guild for guild in self._state._guilds.values() if guild.get_member(self.id)]
+    
+    @property
+    def premium_type(self) -> Optional[PremiumType]:
+        """Specifies the type of Nitro subscription on a given user.
+        
+        The API field that this uses may be removed in the future.
+
+        Returns
+        --------
+        :class:`PremiumType`
+            The type of premium subscription the user has.
+            :attr:`PremiumType.keyerror` if the field is not found.
+        """
+        if self._premium_type is None:
+            return PremiumType.keyerror
+
+        return try_enum(PremiumType, self._premium_type)
 
     async def create_dm(self) -> DMChannel:
         """|coro|
@@ -554,3 +576,4 @@ class User(BaseUser, discord.abc.Messageable):
         state = self._state
         data: DMChannelPayload = await state.http.start_private_message(self.id)
         return state.add_dm_channel(data)
+    

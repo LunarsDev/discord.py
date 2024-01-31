@@ -73,6 +73,9 @@ import logging
 
 import yarl
 
+if TYPE_CHECKING:
+    from .user import _UserTag
+
 try:
     import orjson  # type: ignore
 except ModuleNotFoundError:
@@ -97,6 +100,7 @@ __all__ = (
     'format_dt',
     'MISSING',
     'setup_logging',
+    'user_has_nitro',
 )
 
 DISCORD_EPOCH = 1420070400000
@@ -1394,3 +1398,47 @@ def _human_join(seq: Sequence[str], /, *, delimiter: str = ', ', final: str = 'o
         return f'{seq[0]} {final} {seq[1]}'
 
     return delimiter.join(seq[:-1]) + f' {final} {seq[-1]}'
+
+def user_has_nitro(user: _UserTag, /) -> bool:
+    from .user import User
+    from .member import Member
+    from .enums import ActivityType, PremiumType
+    from .partial_emoji import PartialEmoji
+    from .activity import CustomActivity
+
+    if not isinstance(user, (User, Member)):
+        raise TypeError('user argument must be a User or Member')
+
+    if user.premium_type not in (PremiumType.keyerror, PremiumType.none):
+        return True
+
+    def custom_status_check(member: Member, /) -> bool:
+        ca: CustomActivity = find(lambda activity: activity.type is ActivityType.custom, member.activities)  # type: ignore
+        if ca is None:
+            return False
+
+        return isinstance(ca.emoji, PartialEmoji) and ca.emoji.is_custom_emoji()
+
+    def user_checks(user: Union[Member, User], /) -> bool:
+        return any(
+            check not in (False, None)
+            for check in (
+                user.banner,
+                user.avatar_decoration,
+                user.avatar.is_animated() if user.avatar else None,
+            )
+        )
+
+    def member_checks(member: Member, /) -> bool:
+        return any(
+            check not in (False, None)
+            for check in (
+                member.premium_since,
+                custom_status_check(member),
+            )
+        )
+
+    if isinstance(user, User):
+        return user_checks(user)
+
+    return user_checks(user) or member_checks(user)
