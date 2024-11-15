@@ -35,7 +35,7 @@ import discord.abc
 from . import utils
 from .asset import Asset
 from .utils import MISSING
-from .user import BaseUser, User, _UserTag
+from .user import BaseUser, ClientUser, User, _UserTag
 from .activity import create_activity, ActivityTypes
 from .permissions import Permissions
 from .enums import PremiumType, Status, try_enum
@@ -322,6 +322,7 @@ class Member(discord.abc.Messageable, _UserTag):
         '_user',
         '_state',
         '_avatar',
+        '_banner',
         '_flags',
         '_avatar_decoration_data',
         '_premium_type',
@@ -360,6 +361,7 @@ class Member(discord.abc.Messageable, _UserTag):
         self.nick: Optional[str] = data.get('nick', None)
         self.pending: bool = data.get('pending', False)
         self._avatar: Optional[str] = data.get('avatar')
+        self._banner: Optional[str] = data.get('banner')
         self._permissions: Optional[int]
         self._flags: int = data['flags']
         self._avatar_decoration_data: Optional[AvatarDecorationData] = data.get('avatar_decoration_data')
@@ -394,6 +396,15 @@ class Member(discord.abc.Messageable, _UserTag):
         author = message.author
         data['user'] = author._to_minimal_user_json()  # type: ignore
         return cls(data=data, guild=message.guild, state=message._state)  # type: ignore
+
+    @classmethod
+    def _from_client_user(cls, *, user: ClientUser, guild: Guild, state: ConnectionState) -> Self:
+        data = {
+            'roles': [],
+            'user': user._to_minimal_user_json(),
+            'flags': 0,
+        }
+        return cls(data=data, guild=guild, state=state)  # type: ignore
 
     def _update_from_message(self, data: MemberPayload) -> None:
         self.joined_at = utils.parse_time(data.get('joined_at'))
@@ -433,6 +444,7 @@ class Member(discord.abc.Messageable, _UserTag):
         self._permissions = member._permissions
         self._state = member._state
         self._avatar = member._avatar
+        self._banner = member._banner
         self._avatar_decoration_data = member._avatar_decoration_data
         self._premium_type = member._premium_type
 
@@ -462,6 +474,7 @@ class Member(discord.abc.Messageable, _UserTag):
         self.timed_out_until = utils.parse_time(data.get('communication_disabled_until'))
         self._roles = utils.SnowflakeList(map(int, data['roles']))
         self._avatar = data.get('avatar')
+        self._banner = data.get('banner')
         self._flags = data.get('flags', 0)
         self._avatar_decoration_data = data.get('avatar_decoration_data')
         self._premium_type = data.get('premium_type')
@@ -648,6 +661,28 @@ class Member(discord.abc.Messageable, _UserTag):
         if self._avatar is None:
             return None
         return Asset._from_guild_avatar(self._state, self.guild.id, self.id, self._avatar)
+
+    @property
+    def display_banner(self) -> Optional[Asset]:
+        """Optional[:class:`Asset`]: Returns the member's displayed banner, if any.
+
+        This is the member's guild banner if available, otherwise it's their
+        global banner. If the member has no banner set then ``None`` is returned.
+
+        .. versionadded:: 2.5
+        """
+        return self.guild_banner or self._user.banner
+
+    @property
+    def guild_banner(self) -> Optional[Asset]:
+        """Optional[:class:`Asset`]: Returns an :class:`Asset` for the guild banner
+        the member has. If unavailable, ``None`` is returned.
+
+        .. versionadded:: 2.5
+        """
+        if self._banner is None:
+            return None
+        return Asset._from_guild_banner(self._state, self.guild.id, self.id, self._banner)
 
     @property
     def activity(self) -> Optional[ActivityTypes]:
@@ -1050,7 +1085,7 @@ class Member(discord.abc.Messageable, _UserTag):
 
         You must have :attr:`~Permissions.manage_roles` to
         use this, and the added :class:`Role`\s must appear lower in the list
-        of roles than the highest role of the member.
+        of roles than the highest role of the client.
 
         Parameters
         -----------
@@ -1089,7 +1124,7 @@ class Member(discord.abc.Messageable, _UserTag):
 
         You must have :attr:`~Permissions.manage_roles` to
         use this, and the removed :class:`Role`\s must appear lower in the list
-        of roles than the highest role of the member.
+        of roles than the highest role of the client.
 
         Parameters
         -----------
@@ -1126,6 +1161,40 @@ class Member(discord.abc.Messageable, _UserTag):
             user_id = self.id
             for role in roles:
                 await req(guild_id, user_id, role.id, reason=reason)
+
+    async def fetch_voice(self) -> VoiceState:
+        """|coro|
+
+        Retrieves the current voice state from this member.
+
+        .. versionadded:: 2.5
+
+        Raises
+        -------
+        NotFound
+            The member is not in a voice channel.
+        Forbidden
+            You do not have permissions to get a voice state.
+        HTTPException
+            Retrieving the voice state failed.
+
+        Returns
+        -------
+        :class:`VoiceState`
+            The current voice state of the member.
+        """
+        guild_id = self.guild.id
+        if self._state.self_id == self.id:
+            data = await self._state.http.get_my_voice_state(guild_id)
+        else:
+            data = await self._state.http.get_voice_state(guild_id, self.id)
+
+        channel_id = data.get('channel_id')
+        channel: Optional[VocalGuildChannel] = None
+        if channel_id is not None:
+            channel = self.guild.get_channel(int(channel_id))  # type: ignore # must be voice channel here
+
+        return VoiceState(data=data, channel=channel)
 
     def get_role(self, role_id: int, /) -> Optional[Role]:
         """Returns a role with the given ID from roles which the member has.

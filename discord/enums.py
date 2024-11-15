@@ -73,10 +73,11 @@ __all__ = (
     'SKUType',
     'EntitlementType',
     'EntitlementOwnerType',
+    'PollLayoutType',
+    'VoiceChannelEffectAnimationType',
+    'SubscriptionStatus',
+    'MessageReferenceType',
 )
-
-if TYPE_CHECKING:
-    from typing_extensions import Self
 
 
 def _create_value_cls(name: str, comparable: bool):
@@ -104,7 +105,14 @@ class EnumMeta(type):
         _enum_member_map_: ClassVar[Dict[str, Any]]
         _enum_value_map_: ClassVar[Dict[Any, Any]]
 
-    def __new__(cls, name: str, bases: Tuple[type, ...], attrs: Dict[str, Any], *, comparable: bool = False) -> Self:
+    def __new__(
+        cls,
+        name: str,
+        bases: Tuple[type, ...],
+        attrs: Dict[str, Any],
+        *,
+        comparable: bool = False,
+    ) -> EnumMeta:
         value_mapping = {}
         member_mapping = {}
         member_names = []
@@ -213,6 +221,12 @@ class ChannelType(Enum):
         return self.name
 
 
+class MessageReferenceType(Enum):
+    default = 0
+    reply = 0
+    forward = 1
+
+
 class MessageType(Enum):
     default = 0
     recipient_add = 1
@@ -251,6 +265,7 @@ class MessageType(Enum):
     guild_incident_alert_mode_disabled = 37
     guild_incident_report_raid = 38
     guild_incident_report_false_alarm = 39
+    purchase_notification = 44
 
 
 class SpeakingState(Enum):
@@ -372,6 +387,9 @@ class AuditLogAction(Enum):
     thread_update                                     = 111
     thread_delete                                     = 112
     app_command_permission_update                     = 121
+    soundboard_sound_create                           = 130
+    soundboard_sound_update                           = 131
+    soundboard_sound_delete                           = 132
     automod_rule_create                               = 140
     automod_rule_update                               = 141
     automod_rule_delete                               = 142
@@ -442,6 +460,9 @@ class AuditLogAction(Enum):
             AuditLogAction.automod_timeout_member:                   None,
             AuditLogAction.creator_monetization_request_created:     None,
             AuditLogAction.creator_monetization_terms_accepted:      None,
+            AuditLogAction.soundboard_sound_create:                  AuditLogActionCategory.create,
+            AuditLogAction.soundboard_sound_update:                  AuditLogActionCategory.update,
+            AuditLogAction.soundboard_sound_delete:                  AuditLogActionCategory.delete,
         }
         # fmt: on
         return lookup[self]
@@ -598,7 +619,7 @@ class InteractionResponseType(Enum):
     message_update = 7  # for components
     autocomplete_result = 8
     modal = 9  # for modals
-    premium_required = 10
+    # premium_required = 10 (deprecated)
 
 
 class VideoQualityMode(Enum):
@@ -630,6 +651,7 @@ class ButtonStyle(Enum):
     success = 3
     danger = 4
     link = 5
+    premium = 6
 
     # Aliases
     blurple = 1
@@ -792,11 +814,20 @@ class SelectDefaultValueType(Enum):
 
 
 class SKUType(Enum):
+    durable = 2
+    consumable = 3
     subscription = 5
     subscription_group = 6
 
 
 class EntitlementType(Enum):
+    purchase = 1
+    premium_subscription = 2
+    developer_gift = 3
+    test_mode_purchase = 4
+    free_purchase = 5
+    user_gift = 6
+    premium_purchase = 7
     application_subscription = 8
 
 
@@ -810,6 +841,32 @@ class PremiumType(Enum):
     nitro_classic = 1
     nitro = 2
     nitro_basic = 3
+
+
+class PollLayoutType(Enum):
+    default = 1
+
+
+class InviteType(Enum):
+    guild = 0
+    group_dm = 1
+    friend = 2
+
+
+class ReactionType(Enum):
+    normal = 0
+    burst = 1
+
+
+class VoiceChannelEffectAnimationType(Enum):
+    premium = 0
+    basic = 1
+
+
+class SubscriptionStatus(Enum):
+    active = 0
+    ending = 1
+    inactive = 2
 
 
 def create_unknown_value(cls: Type[E], val: Any) -> E:

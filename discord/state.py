@@ -78,6 +78,9 @@ from .sticker import GuildSticker
 from .automod import AutoModRule, AutoModAction
 from .audit_logs import AuditLogEntry
 from ._types import ClientT
+from .soundboard import SoundboardSound
+from .subscription import Subscription
+
 
 if TYPE_CHECKING:
     from .abc import PrivateChannel
@@ -89,6 +92,7 @@ if TYPE_CHECKING:
     from .ui.item import Item
     from .ui.dynamic import DynamicItem
     from .app_commands import CommandTree, Translator
+    from .poll import Poll
 
     from .types.automod import AutoModerationRule, AutoModerationActionExecution
     from .types.snowflake import Snowflake
@@ -429,8 +433,8 @@ class ConnectionState(Generic[ClientT]):
         # the keys of self._guilds are ints
         return self._guilds.get(guild_id)  # type: ignore
 
-    def _get_or_create_unavailable_guild(self, guild_id: int) -> Guild:
-        return self._guilds.get(guild_id) or Guild._create_unavailable(state=self, guild_id=guild_id)
+    def _get_or_create_unavailable_guild(self, guild_id: int, *, data: Optional[Dict[str, Any]] = None) -> Guild:
+        return self._guilds.get(guild_id) or Guild._create_unavailable(state=self, guild_id=guild_id, data=data)
 
     def _add_guild(self, guild: Guild) -> None:
         self._guilds[guild.id] = guild
@@ -453,6 +457,14 @@ class ConnectionState(Generic[ClientT]):
     @property
     def stickers(self) -> Sequence[GuildSticker]:
         return utils.SequenceProxy(self._stickers.values())
+
+    @property
+    def soundboard_sounds(self) -> List[SoundboardSound]:
+        all_sounds = []
+        for guild in self.guilds:
+            all_sounds.extend(guild.soundboard_sounds)
+
+        return all_sounds
 
     def get_emoji(self, emoji_id: Optional[int]) -> Optional[Emoji]:
         # the keys of self._emojis are ints
@@ -532,6 +544,13 @@ class ConnectionState(Generic[ClientT]):
             channel = guild and guild._resolve_channel(channel_id)
 
         return channel or PartialMessageable(state=self, guild_id=guild_id, id=channel_id), guild
+
+    def _update_poll_counts(self, message: Message, answer_id: int, added: bool, self_voted: bool = False) -> Optional[Poll]:
+        poll = message.poll
+        if not poll:
+            return
+        poll._handle_vote(answer_id, added, self_voted)
+        return poll
 
     async def chunker(
         self, guild_id: int, query: str = '', limit: int = 0, presences: bool = False, *, nonce: Optional[str] = None
@@ -830,6 +849,12 @@ class ConnectionState(Generic[ClientT]):
                         if s.channel_id == channel.id:
                             guild._scheduled_events.pop(s.id)
                             self.dispatch('scheduled_event_delete', s)
+
+                threads = guild._remove_threads_by_channel(channel_id)
+
+                for thread in threads:
+                    self.dispatch('thread_delete', thread)
+                    self.dispatch('raw_thread_delete', RawThreadDeleteEvent._from_thread(thread))
 
     def parse_channel_update(self, data: gw.ChannelUpdateEvent) -> None:
         channel_type = try_enum(ChannelType, data.get('type'))
@@ -1541,6 +1566,63 @@ class ConnectionState(Generic[ClientT]):
         else:
             _log.debug('SCHEDULED_EVENT_USER_REMOVE referencing unknown guild ID: %s. Discarding.', data['guild_id'])
 
+    def parse_guild_soundboard_sound_create(self, data: gw.GuildSoundBoardSoundCreateEvent) -> None:
+        guild_id = int(data['guild_id'])  # type: ignore # can't be None here
+        guild = self._get_guild(guild_id)
+        if guild is not None:
+            sound = SoundboardSound(guild=guild, state=self, data=data)
+            guild._add_soundboard_sound(sound)
+            self.dispatch('soundboard_sound_create', sound)
+        else:
+            _log.debug('GUILD_SOUNDBOARD_SOUND_CREATE referencing unknown guild ID: %s. Discarding.', guild_id)
+
+    def _update_and_dispatch_sound_update(self, sound: SoundboardSound, data: gw.GuildSoundBoardSoundUpdateEvent):
+        old_sound = copy.copy(sound)
+        sound._update(data)
+        self.dispatch('soundboard_sound_update', old_sound, sound)
+
+    def parse_guild_soundboard_sound_update(self, data: gw.GuildSoundBoardSoundUpdateEvent) -> None:
+        guild_id = int(data['guild_id'])  # type: ignore # can't be None here
+        guild = self._get_guild(guild_id)
+        if guild is not None:
+            sound_id = int(data['sound_id'])
+            sound = guild.get_soundboard_sound(sound_id)
+            if sound is not None:
+                self._update_and_dispatch_sound_update(sound, data)
+            else:
+                _log.warning('GUILD_SOUNDBOARD_SOUND_UPDATE referencing unknown sound ID: %s. Discarding.', sound_id)
+        else:
+            _log.debug('GUILD_SOUNDBOARD_SOUND_UPDATE referencing unknown guild ID: %s. Discarding.', guild_id)
+
+    def parse_guild_soundboard_sound_delete(self, data: gw.GuildSoundBoardSoundDeleteEvent) -> None:
+        guild_id = int(data['guild_id'])
+        guild = self._get_guild(guild_id)
+        if guild is not None:
+            sound_id = int(data['sound_id'])
+            sound = guild.get_soundboard_sound(sound_id)
+            if sound is not None:
+                guild._remove_soundboard_sound(sound)
+                self.dispatch('soundboard_sound_delete', sound)
+            else:
+                _log.warning('GUILD_SOUNDBOARD_SOUND_DELETE referencing unknown sound ID: %s. Discarding.', sound_id)
+        else:
+            _log.debug('GUILD_SOUNDBOARD_SOUND_DELETE referencing unknown guild ID: %s. Discarding.', guild_id)
+
+    def parse_guild_soundboard_sounds_update(self, data: gw.GuildSoundBoardSoundsUpdateEvent) -> None:
+        guild_id = int(data['guild_id'])
+        guild = self._get_guild(guild_id)
+        if guild is None:
+            _log.debug('GUILD_SOUNDBOARD_SOUNDS_UPDATE referencing unknown guild ID: %s. Discarding.', guild_id)
+            return
+
+        for raw_sound in data['soundboard_sounds']:
+            sound_id = int(raw_sound['sound_id'])
+            sound = guild.get_soundboard_sound(sound_id)
+            if sound is not None:
+                self._update_and_dispatch_sound_update(sound, raw_sound)
+            else:
+                _log.warning('GUILD_SOUNDBOARD_SOUNDS_UPDATE referencing unknown sound ID: %s. Discarding.', sound_id)
+
     def parse_application_command_permissions_update(self, data: GuildApplicationCommandPermissionsPayload):
         raw = RawAppCommandPermissionsUpdateEvent(data=data, state=self)
         self.dispatch('raw_app_command_permissions_update', raw)
@@ -1571,6 +1653,14 @@ class ConnectionState(Generic[ClientT]):
             else:
                 _log.debug('VOICE_STATE_UPDATE referencing an unknown member ID: %s. Discarding.', data['user_id'])
 
+    def parse_voice_channel_effect_send(self, data: gw.VoiceChannelEffectSendEvent):
+        guild = self._get_guild(int(data['guild_id']))
+        if guild is not None:
+            effect = VoiceChannelEffect(state=self, data=data, guild=guild)
+            self.dispatch('voice_channel_effect', effect)
+        else:
+            _log.debug('VOICE_CHANNEL_EFFECT_SEND referencing an unknown guild ID: %s. Discarding.', data['guild_id'])
+
     def parse_voice_server_update(self, data: gw.VoiceServerUpdateEvent) -> None:
         key_id = int(data['guild_id'])
 
@@ -1586,7 +1676,8 @@ class ConnectionState(Generic[ClientT]):
 
         if channel is not None:
             if isinstance(channel, DMChannel):
-                channel.recipient = raw.user
+                if raw.user is not None and raw.user not in channel.recipients:
+                    channel.recipients.append(raw.user)
             elif guild is not None:
                 raw.user = guild.get_member(raw.user_id)
 
@@ -1611,6 +1702,54 @@ class ConnectionState(Generic[ClientT]):
     def parse_entitlement_delete(self, data: gw.EntitlementDeleteEvent) -> None:
         entitlement = Entitlement(data=data, state=self)
         self.dispatch('entitlement_delete', entitlement)
+
+    def parse_message_poll_vote_add(self, data: gw.PollVoteActionEvent) -> None:
+        raw = RawPollVoteActionEvent(data)
+
+        self.dispatch('raw_poll_vote_add', raw)
+
+        message = self._get_message(raw.message_id)
+        guild = self._get_guild(raw.guild_id)
+
+        if guild:
+            user = guild.get_member(raw.user_id)
+        else:
+            user = self.get_user(raw.user_id)
+
+        if message and user:
+            poll = self._update_poll_counts(message, raw.answer_id, True, raw.user_id == self.self_id)
+            if poll:
+                self.dispatch('poll_vote_add', user, poll.get_answer(raw.answer_id))
+
+    def parse_message_poll_vote_remove(self, data: gw.PollVoteActionEvent) -> None:
+        raw = RawPollVoteActionEvent(data)
+
+        self.dispatch('raw_poll_vote_remove', raw)
+
+        message = self._get_message(raw.message_id)
+        guild = self._get_guild(raw.guild_id)
+
+        if guild:
+            user = guild.get_member(raw.user_id)
+        else:
+            user = self.get_user(raw.user_id)
+
+        if message and user:
+            poll = self._update_poll_counts(message, raw.answer_id, False, raw.user_id == self.self_id)
+            if poll:
+                self.dispatch('poll_vote_remove', user, poll.get_answer(raw.answer_id))
+
+    def parse_subscription_create(self, data: gw.SubscriptionCreateEvent) -> None:
+        subscription = Subscription(data=data, state=self)
+        self.dispatch('subscription_create', subscription)
+
+    def parse_subscription_update(self, data: gw.SubscriptionUpdateEvent) -> None:
+        subscription = Subscription(data=data, state=self)
+        self.dispatch('subscription_update', subscription)
+
+    def parse_subscription_delete(self, data: gw.SubscriptionDeleteEvent) -> None:
+        subscription = Subscription(data=data, state=self)
+        self.dispatch('subscription_delete', subscription)
 
     def _get_reaction_user(self, channel: MessageableChannel, user_id: int) -> Optional[Union[User, Member]]:
         if isinstance(channel, (TextChannel, Thread, VoiceChannel)):
@@ -1655,6 +1794,15 @@ class ConnectionState(Generic[ClientT]):
 
     def create_message(self, *, channel: MessageableChannel, data: MessagePayload) -> Message:
         return Message(state=self, channel=channel, data=data)
+
+    def get_soundboard_sound(self, id: Optional[int]) -> Optional[SoundboardSound]:
+        if id is None:
+            return
+
+        for guild in self.guilds:
+            sound = guild._resolve_soundboard_sound(id)
+            if sound is not None:
+                return sound
 
 
 class AutoShardedConnectionState(ConnectionState[ClientT]):
