@@ -43,7 +43,7 @@ import inspect
 from discord import app_commands
 from discord.utils import MISSING, maybe_coroutine, async_all
 from .core import Command, Group
-from .errors import BadArgument, CommandRegistrationError, CommandError, HybridCommandError, ConversionError
+from .errors import BadArgument, CommandRegistrationError, CommandError, HybridCommandError, ConversionError, DisabledCommand
 from .converter import Converter, Range, Greedy, run_converters, CONVERTER_MAPPING
 from .parameters import Parameter
 from .flags import is_flag, FlagConverter
@@ -297,6 +297,8 @@ def replace_parameters(
 
 
 class HybridAppCommand(discord.app_commands.Command[CogT, P, T]):
+    __commands_is_hybrid_app_command__: ClassVar[bool] = True
+
     def __init__(
         self,
         wrapped: Union[HybridCommand[CogT, ..., T], HybridGroup[CogT, ..., T]],
@@ -524,6 +526,9 @@ class HybridCommand(Command[CogT, P, T]):
             self.app_command.binding = value
 
     async def can_run(self, ctx: Context[BotT], /) -> bool:
+        if not self.enabled:
+            raise DisabledCommand(f'{self.name} command is disabled')
+
         if ctx.interaction is not None and self.app_command:
             return await self.app_command._check_can_run(ctx.interaction)
         else:
@@ -651,6 +656,8 @@ class HybridGroup(Group[CogT, P, T]):
             guild_only = getattr(self.callback, '__discord_app_commands_guild_only__', False)
             default_permissions = getattr(self.callback, '__discord_app_commands_default_permissions__', None)
             nsfw = getattr(self.callback, '__discord_app_commands_is_nsfw__', False)
+            contexts = getattr(self.callback, '__discord_app_commands_contexts__', MISSING)
+            installs = getattr(self.callback, '__discord_app_commands_installation_types__', MISSING)
             self.app_command = app_commands.Group(
                 name=self._locale_name or self.name,
                 description=self._locale_description or self.description or self.short_doc or '…',
@@ -658,6 +665,8 @@ class HybridGroup(Group[CogT, P, T]):
                 guild_only=guild_only,
                 default_permissions=default_permissions,
                 nsfw=nsfw,
+                allowed_installs=installs,
+                allowed_contexts=contexts,
             )
 
             # This prevents the group from re-adding the command at __init__
@@ -900,7 +909,7 @@ def hybrid_command(
     def decorator(func: CommandCallback[CogT, ContextT, P, T]) -> HybridCommand[CogT, P, T]:
         if isinstance(func, Command):
             raise TypeError('Callback is already a command.')
-        return HybridCommand(func, name=name, with_app_command=with_app_command, **attrs)  # type: ignore  # ???
+        return HybridCommand(func, name=name, with_app_command=with_app_command, **attrs)
 
     return decorator
 

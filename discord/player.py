@@ -288,6 +288,12 @@ class FFmpegPCMAudio(FFmpegAudio):
         passed to the stdin of ffmpeg.
     executable: :class:`str`
         The executable name (and path) to use. Defaults to ``ffmpeg``.
+
+        .. warning::
+
+            Since this class spawns a subprocess, care should be taken to not
+            pass in an arbitrary executable name when using this parameter.
+
     pipe: :class:`bool`
         If ``True``, denotes that ``source`` parameter will be passed
         to the stdin of ffmpeg. Defaults to ``False``.
@@ -392,6 +398,12 @@ class FFmpegOpusAudio(FFmpegAudio):
 
     executable: :class:`str`
         The executable name (and path) to use. Defaults to ``ffmpeg``.
+
+        .. warning::
+
+            Since this class spawns a subprocess, care should be taken to not
+            pass in an arbitrary executable name when using this parameter.
+
     pipe: :class:`bool`
         If ``True``, denotes that ``source`` parameter will be passed
         to the stdin of ffmpeg. Defaults to ``False``.
@@ -576,22 +588,26 @@ class FFmpegOpusAudio(FFmpegAudio):
         loop = asyncio.get_running_loop()
         try:
             codec, bitrate = await loop.run_in_executor(None, lambda: probefunc(source, executable))
-        except Exception:
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException:
             if not fallback:
                 _log.exception("Probe '%s' using '%s' failed", method, executable)
-                return  # type: ignore
+                return None, None
 
             _log.exception("Probe '%s' using '%s' failed, trying fallback", method, executable)
             try:
                 codec, bitrate = await loop.run_in_executor(None, lambda: fallback(source, executable))
-            except Exception:
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException:
                 _log.exception("Fallback probe using '%s' failed", executable)
             else:
                 _log.debug("Fallback probe found codec=%s, bitrate=%s", codec, bitrate)
         else:
             _log.debug("Probe found codec=%s, bitrate=%s", codec, bitrate)
-        finally:
-            return codec, bitrate
+
+        return codec, bitrate
 
     @staticmethod
     def _probe_codec_native(source, executable: str = 'ffmpeg') -> Tuple[Optional[str], Optional[int]]:
@@ -703,7 +719,6 @@ class AudioPlayer(threading.Thread):
         self._resumed: threading.Event = threading.Event()
         self._resumed.set()  # we are not paused
         self._current_error: Optional[Exception] = None
-        self._connected: threading.Event = client._connected
         self._lock: threading.Lock = threading.Lock()
 
         if after is not None and not callable(after):
@@ -714,7 +729,8 @@ class AudioPlayer(threading.Thread):
         self._start = time.perf_counter()
 
         # getattr lookup speed ups
-        play_audio = self.client.send_audio_packet
+        client = self.client
+        play_audio = client.send_audio_packet
         self._speak(SpeakingState.voice)
 
         while not self._end.is_set():
@@ -725,27 +741,34 @@ class AudioPlayer(threading.Thread):
                 self._resumed.wait()
                 continue
 
-            # are we disconnected from voice?
-            if not self._connected.is_set():
-                # wait until we are connected
-                self._connected.wait()
-                # reset our internal data
-                self.loops = 0
-                self._start = time.perf_counter()
-
-            self.loops += 1
             data = self.source.read()
 
             if not data:
                 self.stop()
                 break
 
+            # are we disconnected from voice?
+            if not client.is_connected():
+                _log.debug('Not connected, waiting for %ss...', client.timeout)
+                # wait until we are connected, but not forever
+                connected = client.wait_until_connected(client.timeout)
+                if self._end.is_set() or not connected:
+                    _log.debug('Aborting playback')
+                    return
+                _log.debug('Reconnected, resuming playback')
+                self._speak(SpeakingState.voice)
+                # reset our internal data
+                self.loops = 0
+                self._start = time.perf_counter()
+
             play_audio(data, encode=not self.source.is_opus())
+            self.loops += 1
             next_time = self._start + self.DELAY * self.loops
             delay = max(0, self.DELAY + (next_time - time.perf_counter()))
             time.sleep(delay)
 
-        self.send_silence()
+        if client.is_connected():
+            self.send_silence()
 
     def run(self) -> None:
         try:
@@ -792,7 +815,7 @@ class AudioPlayer(threading.Thread):
     def is_paused(self) -> bool:
         return not self._end.is_set() and not self._resumed.is_set()
 
-    def _set_source(self, source: AudioSource) -> None:
+    def set_source(self, source: AudioSource) -> None:
         with self._lock:
             self.pause(update_speaking=False)
             self.source = source

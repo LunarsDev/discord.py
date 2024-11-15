@@ -21,6 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -32,9 +33,8 @@ import sys
 import time
 import threading
 import traceback
-import zlib
 
-from typing import Any, Callable, Coroutine, Deque, Dict, List, TYPE_CHECKING, NamedTuple, Optional, TypeVar
+from typing import Any, Callable, Coroutine, Deque, Dict, List, TYPE_CHECKING, NamedTuple, Optional, TypeVar, Tuple
 
 import aiohttp
 import yarl
@@ -59,7 +59,7 @@ if TYPE_CHECKING:
 
     from .client import Client
     from .state import ConnectionState
-    from .voice_client import VoiceClient
+    from .voice_state import VoiceConnectionState
 
 
 class ReconnectWebSocket(Exception):
@@ -295,19 +295,19 @@ class DiscordWebSocket:
 
     # fmt: off
     DEFAULT_GATEWAY    = yarl.URL('wss://gateway.discord.gg/')
-    DISPATCH           = 0
-    HEARTBEAT          = 1
-    IDENTIFY           = 2
-    PRESENCE           = 3
-    VOICE_STATE        = 4
-    VOICE_PING         = 5
-    RESUME             = 6
-    RECONNECT          = 7
-    REQUEST_MEMBERS    = 8
-    INVALIDATE_SESSION = 9
-    HELLO              = 10
-    HEARTBEAT_ACK      = 11
-    GUILD_SYNC         = 12
+    DISPATCH                    = 0
+    HEARTBEAT                   = 1
+    IDENTIFY                    = 2
+    PRESENCE                    = 3
+    VOICE_STATE                 = 4
+    VOICE_PING                  = 5
+    RESUME                      = 6
+    RECONNECT                   = 7
+    REQUEST_MEMBERS             = 8
+    INVALIDATE_SESSION          = 9
+    HELLO                       = 10
+    HEARTBEAT_ACK               = 11
+    GUILD_SYNC                  = 12
     # fmt: on
 
     def __init__(self, socket: aiohttp.ClientWebSocketResponse, *, loop: asyncio.AbstractEventLoop) -> None:
@@ -325,8 +325,7 @@ class DiscordWebSocket:
         # ws related stuff
         self.session_id: Optional[str] = None
         self.sequence: Optional[int] = None
-        self._zlib: zlib._Decompress = zlib.decompressobj()
-        self._buffer: bytearray = bytearray()
+        self._decompressor: utils._DecompressionContext = utils._ActiveDecompressionContext()
         self._close_code: Optional[int] = None
         self._rate_limiter: GatewayRatelimiter = GatewayRatelimiter()
 
@@ -355,7 +354,7 @@ class DiscordWebSocket:
         sequence: Optional[int] = None,
         resume: bool = False,
         encoding: str = 'json',
-        zlib: bool = True,
+        compress: bool = True,
     ) -> Self:
         """Creates a main websocket for Discord from a :class:`Client`.
 
@@ -366,10 +365,12 @@ class DiscordWebSocket:
 
         gateway = gateway or cls.DEFAULT_GATEWAY
 
-        if zlib:
-            url = gateway.with_query(v=INTERNAL_API_VERSION, encoding=encoding, compress='zlib-stream')
-        else:
+        if not compress:
             url = gateway.with_query(v=INTERNAL_API_VERSION, encoding=encoding)
+        else:
+            url = gateway.with_query(
+                v=INTERNAL_API_VERSION, encoding=encoding, compress=utils._ActiveDecompressionContext.COMPRESSION_TYPE
+            )
 
         socket = await client.http.ws_connect(str(url))
         ws = cls(socket, loop=client.loop)
@@ -488,13 +489,11 @@ class DiscordWebSocket:
 
     async def received_message(self, msg: Any, /) -> None:
         if type(msg) is bytes:
-            self._buffer.extend(msg)
+            msg = self._decompressor.decompress(msg)
 
-            if len(msg) < 4 or msg[-4:] != b'\x00\x00\xff\xff':
+            # Received a partial gateway message
+            if msg is None:
                 return
-            msg = self._zlib.decompress(self._buffer)
-            msg = msg.decode('utf-8')
-            self._buffer = bytearray()
 
         self.log_receive(msg)
         msg = utils._from_json(msg)
@@ -607,7 +606,10 @@ class DiscordWebSocket:
 
     def _can_handle_close(self) -> bool:
         code = self._close_code or self.socket.close_code
-        return code not in (1000, 4004, 4010, 4011, 4012, 4013, 4014)
+        # If the socket is closed remotely with 1000 and it's not our own explicit close
+        # then it's an improper close that should be handled and reconnected
+        is_improper_close = self._close_code is None and self.socket.close_code == 1000
+        return is_improper_close or code not in (1000, 4004, 4010, 4011, 4012, 4013, 4014)
 
     async def poll_event(self) -> None:
         """Polls for a DISPATCH event and handles the general gateway loop.
@@ -624,8 +626,8 @@ class DiscordWebSocket:
             elif msg.type is aiohttp.WSMsgType.BINARY:
                 await self.received_message(msg.data)
             elif msg.type is aiohttp.WSMsgType.ERROR:
-                _log.debug('Received %s', msg)
-                raise msg.data
+                _log.debug('Received error %s', msg)
+                raise WebSocketClosure
             elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.CLOSE):
                 _log.debug('Received %s', msg)
                 raise WebSocketClosure
@@ -797,7 +799,7 @@ class DiscordVoiceWebSocket:
 
     if TYPE_CHECKING:
         thread_id: int
-        _connection: VoiceClient
+        _connection: VoiceConnectionState
         gateway: str
         _max_heartbeat_timeout: float
 
@@ -827,7 +829,7 @@ class DiscordVoiceWebSocket:
         self.loop: asyncio.AbstractEventLoop = loop
         self._keep_alive: Optional[VoiceKeepAliveHandler] = None
         self._close_code: Optional[int] = None
-        self.secret_key: Optional[str] = None
+        self.secret_key: Optional[List[int]] = None
         if hook:
             self._hook = hook
 
@@ -866,16 +868,21 @@ class DiscordVoiceWebSocket:
         await self.send_as_json(payload)
 
     @classmethod
-    async def from_client(
-        cls, client: VoiceClient, *, resume: bool = False, hook: Optional[Callable[..., Coroutine[Any, Any, Any]]] = None
+    async def from_connection_state(
+        cls,
+        state: VoiceConnectionState,
+        *,
+        resume: bool = False,
+        hook: Optional[Callable[..., Coroutine[Any, Any, Any]]] = None,
     ) -> Self:
         """Creates a voice websocket for the :class:`VoiceClient`."""
-        gateway = 'wss://' + client.endpoint + '/?v=4'
+        gateway = f'wss://{state.endpoint}/?v=4'
+        client = state.voice_client
         http = client._state.http
         socket = await http.ws_connect(gateway, compress=15)
         ws = cls(socket, loop=client.loop, hook=hook)
         ws.gateway = gateway
-        ws._connection = client
+        ws._connection = state
         ws._max_heartbeat_timeout = 60.0
         ws.thread_id = threading.get_ident()
 
@@ -951,29 +958,49 @@ class DiscordVoiceWebSocket:
         state.voice_port = data['port']
         state.endpoint_ip = data['ip']
 
-        packet = bytearray(74)
-        struct.pack_into('>H', packet, 0, 1)  # 1 = Send
-        struct.pack_into('>H', packet, 2, 70)  # 70 = Length
-        struct.pack_into('>I', packet, 4, state.ssrc)
-        state.socket.sendto(packet, (state.endpoint_ip, state.voice_port))
-        recv = await self.loop.sock_recv(state.socket, 74)
-        _log.debug('received packet in initial_connection: %s', recv)
+        _log.debug('Connecting to voice socket')
+        await self.loop.sock_connect(state.socket, (state.endpoint_ip, state.voice_port))
 
-        # the ip is ascii starting at the 8th byte and ending at the first null
-        ip_start = 8
-        ip_end = recv.index(0, ip_start)
-        state.ip = recv[ip_start:ip_end].decode('ascii')
-
-        state.port = struct.unpack_from('>H', recv, len(recv) - 2)[0]
-        _log.debug('detected ip: %s port: %s', state.ip, state.port)
-
+        state.ip, state.port = await self.discover_ip()
         # there *should* always be at least one supported mode (xsalsa20_poly1305)
         modes = [mode for mode in data['modes'] if mode in self._connection.supported_modes]
-        _log.debug('received supported encryption modes: %s', ", ".join(modes))
+        _log.debug('received supported encryption modes: %s', ', '.join(modes))
 
         mode = modes[0]
         await self.select_protocol(state.ip, state.port, mode)
         _log.debug('selected the voice protocol for use (%s)', mode)
+
+    async def discover_ip(self) -> Tuple[str, int]:
+        state = self._connection
+        packet = bytearray(74)
+        struct.pack_into('>H', packet, 0, 1)  # 1 = Send
+        struct.pack_into('>H', packet, 2, 70)  # 70 = Length
+        struct.pack_into('>I', packet, 4, state.ssrc)
+
+        _log.debug('Sending ip discovery packet')
+        await self.loop.sock_sendall(state.socket, packet)
+
+        fut: asyncio.Future[bytes] = self.loop.create_future()
+
+        def get_ip_packet(data: bytes):
+            if data[1] == 0x02 and len(data) == 74:
+                self.loop.call_soon_threadsafe(fut.set_result, data)
+
+        fut.add_done_callback(lambda f: state.remove_socket_listener(get_ip_packet))
+        state.add_socket_listener(get_ip_packet)
+        recv = await fut
+
+        _log.debug('Received ip discovery packet: %s', recv)
+
+        # the ip is ascii starting at the 8th byte and ending at the first null
+        ip_start = 8
+        ip_end = recv.index(0, ip_start)
+        ip = recv[ip_start:ip_end].decode('ascii')
+
+        port = struct.unpack_from('>H', recv, len(recv) - 2)[0]
+        _log.debug('detected ip: %s port: %s', ip, port)
+
+        return ip, port
 
     @property
     def latency(self) -> float:
@@ -995,9 +1022,8 @@ class DiscordVoiceWebSocket:
         self.secret_key = self._connection.secret_key = data['secret_key']
 
         # Send a speak command with the "not speaking" state.
-        # This also tells Discord our SSRC value, which Discord requires
-        # before sending any voice data (and is the real reason why we
-        # call this here).
+        # This also tells Discord our SSRC value, which Discord requires before
+        # sending any voice data (and is the real reason why we call this here).
         await self.speak(SpeakingState.none)
 
     async def poll_event(self) -> None:
@@ -1006,10 +1032,10 @@ class DiscordVoiceWebSocket:
         if msg.type is aiohttp.WSMsgType.TEXT:
             await self.received_message(utils._from_json(msg.data))
         elif msg.type is aiohttp.WSMsgType.ERROR:
-            _log.debug('Received %s', msg)
+            _log.debug('Received voice %s', msg)
             raise ConnectionClosed(self.ws, shard_id=None) from msg.data
         elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSING):
-            _log.debug('Received %s', msg)
+            _log.debug('Received voice %s', msg)
             raise ConnectionClosed(self.ws, shard_id=None, code=self._close_code)
 
     async def close(self, code: int = 1000) -> None:

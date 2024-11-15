@@ -34,7 +34,6 @@ import time
 import os
 from .item import Item, ItemCallbackType
 from .dynamic import DynamicItem
-from ..enums import ComponentType
 from ..components import (
     Component,
     ActionRow as ActionRowComponent,
@@ -79,26 +78,10 @@ def _component_to_item(component: Component) -> Item:
 
         return Button.from_component(component)
     if isinstance(component, SelectComponent):
-        if component.type is ComponentType.select:
-            from .select import Select
+        from .select import BaseSelect
 
-            return Select.from_component(component)
-        elif component.type is ComponentType.user_select:
-            from .select import UserSelect
+        return BaseSelect.from_component(component)
 
-            return UserSelect.from_component(component)
-        elif component.type is ComponentType.mentionable_select:
-            from .select import MentionableSelect
-
-            return MentionableSelect.from_component(component)
-        elif component.type is ComponentType.channel_select:
-            from .select import ChannelSelect
-
-            return ChannelSelect().from_component(component)
-        elif component.type is ComponentType.role_select:
-            from .select import RoleSelect
-
-            return RoleSelect.from_component(component)
     return Item.from_component(component)
 
 
@@ -337,7 +320,7 @@ class View:
             or the row the item is trying to be added to is full.
         """
 
-        if len(self._children) > 25:
+        if len(self._children) >= 25:
             raise ValueError('maximum number of children exceeded')
 
         if not isinstance(item, Item):
@@ -630,18 +613,17 @@ class ViewStore:
         if interaction.message is None:
             return
 
-        view = View.from_message(interaction.message)
+        view = View.from_message(interaction.message, timeout=None)
 
-        base_item_index: Optional[int] = None
-        for index, child in enumerate(view._children):
-            if child.type.value == component_type and getattr(child, 'custom_id', None) == custom_id:
-                base_item_index = index
-                break
-
-        if base_item_index is None:
+        try:
+            base_item_index, base_item = next(
+                (index, child)
+                for index, child in enumerate(view._children)
+                if child.type.value == component_type and getattr(child, 'custom_id', None) == custom_id
+            )
+        except StopIteration:
             return
 
-        base_item = view._children[base_item_index]
         try:
             item = await factory.from_custom_id(interaction, base_item, match)
         except Exception:
@@ -651,6 +633,7 @@ class ViewStore:
         # Swap the item in the view with our new dynamic item
         view._children[base_item_index] = item
         item._view = view
+        item._rendered_row = base_item._rendered_row
         item._refresh_state(interaction, interaction.data)  # type: ignore
 
         try:
@@ -684,8 +667,8 @@ class ViewStore:
         msg = interaction.message
         if msg is not None:
             message_id = msg.id
-            if msg.interaction:
-                interaction_id = msg.interaction.id
+            if msg.interaction_metadata:
+                interaction_id = msg.interaction_metadata.id
 
         key = (component_type, custom_id)
 

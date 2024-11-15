@@ -169,7 +169,7 @@ class CogMeta(type):
     __cog_app_commands__: List[Union[app_commands.Group, app_commands.Command[Any, ..., Any]]]
     __cog_listeners__: List[Tuple[str, str]]
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+    def __new__(cls, *args: Any, **kwargs: Any) -> CogMeta:
         name, bases, attrs = args
         if any(issubclass(base, app_commands.Group) for base in bases):
             raise TypeError(
@@ -318,6 +318,8 @@ class Cog(metaclass=CogMeta):
                 parent=None,
                 guild_ids=getattr(cls, '__discord_app_commands_default_guilds__', None),
                 guild_only=getattr(cls, '__discord_app_commands_guild_only__', False),
+                allowed_contexts=getattr(cls, '__discord_app_commands_contexts__', None),
+                allowed_installs=getattr(cls, '__discord_app_commands_installation_types__', None),
                 default_permissions=getattr(cls, '__discord_app_commands_default_permissions__', None),
                 extras=cls.__cog_group_extras__,
             )
@@ -362,9 +364,11 @@ class Cog(metaclass=CogMeta):
                     if isinstance(app_command, app_commands.Group):
                         for child in app_command.walk_commands():
                             app_command_refs[child.qualified_name] = child
+                            if hasattr(child, '__commands_is_hybrid_app_command__') and child.qualified_name in lookup:
+                                child.wrapped = lookup[child.qualified_name]  # type: ignore
 
                     if self.__cog_app_commands_group__:
-                        children.append(app_command)  # type: ignore # Somehow it thinks it can be None here
+                        children.append(app_command)
 
         if Cog._get_overridden_method(self.cog_app_command_error) is not None:
             error_handler = self.cog_app_command_error
