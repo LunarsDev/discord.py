@@ -152,7 +152,7 @@ class _LoopSentinel:
 _loop: Any = _LoopSentinel()
 
 
-class Client[DB: Pool | Connection]:
+class Client:
     r"""Represents a client connection that connects to Discord.
     This class is used to interact with the Discord WebSocket and API.
 
@@ -274,7 +274,7 @@ class Client[DB: Pool | Connection]:
         The websocket gateway the client is currently connected to. Could be ``None``.
     """
 
-    def __init__(self, *, intents: Intents, db: DB, **options: Any) -> None:
+    def __init__(self, *, intents: Intents, **options: Any) -> None:
         self.loop: asyncio.AbstractEventLoop = _loop
         # self.ws is set in the connect method
         self.ws: DiscordWebSocket = None  # type: ignore
@@ -307,17 +307,13 @@ class Client[DB: Pool | Connection]:
         }
 
         self._enable_debug_events: bool = options.pop('enable_debug_events', False)
-        self._connection: ConnectionState[DB, Self] = self._get_state(intents=intents, **options)
+        self._connection: ConnectionState[Self] = self._get_state(intents=intents, **options)
         self._connection.shard_count = self.shard_count
         self._closing_task: Optional[asyncio.Task[None]] = None
         self._ready: asyncio.Event = MISSING
         self._application: Optional[AppInfo] = None
         self._connection._get_websocket = self._get_websocket
         self._connection._get_client = lambda: self
-
-        self.db: DB = db
-        if not isinstance(self.db, (Pool, Connection)):
-            raise TypeError(f"db must be an instance of Pool or Connection, not {self.db!r}")
 
         if VoiceClient.warn_nacl:
             VoiceClient.warn_nacl = False
@@ -344,8 +340,8 @@ class Client[DB: Pool | Connection]:
     def _get_websocket(self, guild_id: Optional[int] = None, *, shard_id: Optional[int] = None) -> DiscordWebSocket:
         return self.ws
 
-    def _get_state(self, **options: Any) -> ConnectionState[DB, Self]:
-        return ConnectionState(dispatch=self.dispatch, handlers=self._handlers, hooks=self._hooks, http=self.http, db=self.db, **options)
+    def _get_state(self, **options: Any) -> ConnectionState[Self]:
+        return ConnectionState(dispatch=self.dispatch, handlers=self._handlers, hooks=self._hooks, http=self.http, **options)
 
     def _handle_ready(self) -> None:
         self._ready.set()
