@@ -53,7 +53,7 @@ from .user import User, ClientUser
 from .invite import Invite
 from .template import Template
 from .widget import Widget
-from .guild import Guild
+from .guild import Guild, GuildPreview
 from .emoji import Emoji
 from .channel import _threaded_channel_factory, PartialMessageable
 from .enums import ChannelType, EntitlementOwnerType
@@ -237,6 +237,15 @@ class Client:
         To enable these events, this must be set to ``True``. Defaults to ``False``.
 
         .. versionadded:: 2.0
+    enable_raw_presences: :class:`bool`
+        Whether to manually enable or disable the :func:`on_raw_presence_update` event.
+
+        Setting this flag to ``True`` requires :attr:`Intents.presences` to be enabled.
+
+        By default, this flag is set to ``True`` only when :attr:`Intents.presences` is enabled and :attr:`Intents.members`
+        is disabled, otherwise it's set to ``False``.
+
+        .. versionadded:: 2.5
     http_trace: :class:`aiohttp.TraceConfig`
         The trace configuration to use for tracking HTTP requests the library does using ``aiohttp``.
         This allows you to check requests the library is using. For more information, check the
@@ -1226,8 +1235,8 @@ class Client:
         event: Literal['raw_app_command_permissions_update'],
         /,
         *,
-        check: Optional[Callable[[RawAppCommandPermissionsUpdateEvent], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawAppCommandPermissionsUpdateEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawAppCommandPermissionsUpdateEvent:
         ...
 
@@ -1237,8 +1246,8 @@ class Client:
         event: Literal['app_command_completion'],
         /,
         *,
-        check: Optional[Callable[[Interaction[Self], Union[Command[Any, ..., Any], ContextMenu]], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Interaction[Self], Union[Command[Any, ..., Any], ContextMenu]], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Interaction[Self], Union[Command[Any, ..., Any], ContextMenu]]:
         ...
 
@@ -1250,8 +1259,8 @@ class Client:
         event: Literal['automod_rule_create', 'automod_rule_update', 'automod_rule_delete'],
         /,
         *,
-        check: Optional[Callable[[AutoModRule], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[AutoModRule], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> AutoModRule:
         ...
 
@@ -1261,8 +1270,8 @@ class Client:
         event: Literal['automod_action'],
         /,
         *,
-        check: Optional[Callable[[AutoModAction], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[AutoModAction], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> AutoModAction:
         ...
 
@@ -1274,8 +1283,8 @@ class Client:
         event: Literal['private_channel_update'],
         /,
         *,
-        check: Optional[Callable[[GroupChannel, GroupChannel], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[GroupChannel, GroupChannel], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[GroupChannel, GroupChannel]:
         ...
 
@@ -1285,8 +1294,8 @@ class Client:
         event: Literal['private_channel_pins_update'],
         /,
         *,
-        check: Optional[Callable[[PrivateChannel, datetime.datetime], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[PrivateChannel, datetime.datetime], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[PrivateChannel, datetime.datetime]:
         ...
 
@@ -1296,8 +1305,8 @@ class Client:
         event: Literal['guild_channel_delete', 'guild_channel_create'],
         /,
         *,
-        check: Optional[Callable[[GuildChannel], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[GuildChannel], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> GuildChannel:
         ...
 
@@ -1307,8 +1316,8 @@ class Client:
         event: Literal['guild_channel_update'],
         /,
         *,
-        check: Optional[Callable[[GuildChannel, GuildChannel], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[GuildChannel, GuildChannel], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[GuildChannel, GuildChannel]:
         ...
 
@@ -1324,7 +1333,7 @@ class Client:
                 bool,
             ]
         ],
-        timeout: Optional[float] = None,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Union[GuildChannel, Thread], Optional[datetime.datetime]]:
         ...
 
@@ -1334,8 +1343,8 @@ class Client:
         event: Literal['typing'],
         /,
         *,
-        check: Optional[Callable[[Messageable, Union[User, Member], datetime.datetime], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Messageable, Union[User, Member], datetime.datetime], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Messageable, Union[User, Member], datetime.datetime]:
         ...
 
@@ -1345,8 +1354,8 @@ class Client:
         event: Literal['raw_typing'],
         /,
         *,
-        check: Optional[Callable[[RawTypingEvent], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawTypingEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawTypingEvent:
         ...
 
@@ -1358,8 +1367,8 @@ class Client:
         event: Literal['connect', 'disconnect', 'ready', 'resumed'],
         /,
         *,
-        check: Optional[Callable[[], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> None:
         ...
 
@@ -1369,8 +1378,8 @@ class Client:
         event: Literal['shard_connect', 'shard_disconnect', 'shard_ready', 'shard_resumed'],
         /,
         *,
-        check: Optional[Callable[[int], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[int], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> int:
         ...
 
@@ -1380,8 +1389,8 @@ class Client:
         event: Literal['socket_event_type', 'socket_raw_receive'],
         /,
         *,
-        check: Optional[Callable[[str], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[str], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> str:
         ...
 
@@ -1391,8 +1400,8 @@ class Client:
         event: Literal['socket_raw_send'],
         /,
         *,
-        check: Optional[Callable[[Union[str, bytes]], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Union[str, bytes]], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Union[str, bytes]:
         ...
 
@@ -1403,8 +1412,8 @@ class Client:
         event: Literal['entitlement_create', 'entitlement_update', 'entitlement_delete'],
         /,
         *,
-        check: Optional[Callable[[Entitlement], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Entitlement], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Entitlement:
         ...
 
@@ -1421,8 +1430,8 @@ class Client:
         ],
         /,
         *,
-        check: Optional[Callable[[Guild], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Guild], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Guild:
         ...
 
@@ -1432,8 +1441,8 @@ class Client:
         event: Literal['guild_update'],
         /,
         *,
-        check: Optional[Callable[[Guild, Guild], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Guild, Guild], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Guild, Guild]:
         ...
 
@@ -1443,8 +1452,8 @@ class Client:
         event: Literal['guild_emojis_update'],
         /,
         *,
-        check: Optional[Callable[[Guild, Sequence[Emoji], Sequence[Emoji]], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Guild, Sequence[Emoji], Sequence[Emoji]], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Guild, Sequence[Emoji], Sequence[Emoji]]:
         ...
 
@@ -1454,8 +1463,8 @@ class Client:
         event: Literal['guild_stickers_update'],
         /,
         *,
-        check: Optional[Callable[[Guild, Sequence[GuildSticker], Sequence[GuildSticker]], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Guild, Sequence[GuildSticker], Sequence[GuildSticker]], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Guild, Sequence[GuildSticker], Sequence[GuildSticker]]:
         ...
 
@@ -1465,8 +1474,8 @@ class Client:
         event: Literal['invite_create', 'invite_delete'],
         /,
         *,
-        check: Optional[Callable[[Invite], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Invite], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Invite:
         ...
 
@@ -1476,8 +1485,8 @@ class Client:
         event: Literal['audit_log_entry_create'],
         /,
         *,
-        check: Optional[Callable[[AuditLogEntry], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[AuditLogEntry], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> AuditLogEntry:
         ...
 
@@ -1489,8 +1498,8 @@ class Client:
         event: Literal['integration_create', 'integration_update'],
         /,
         *,
-        check: Optional[Callable[[Integration], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Integration], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Integration:
         ...
 
@@ -1500,8 +1509,8 @@ class Client:
         event: Literal['guild_integrations_update'],
         /,
         *,
-        check: Optional[Callable[[Guild], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Guild], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Guild:
         ...
 
@@ -1511,8 +1520,8 @@ class Client:
         event: Literal['webhooks_update'],
         /,
         *,
-        check: Optional[Callable[[GuildChannel], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[GuildChannel], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> GuildChannel:
         ...
 
@@ -1522,8 +1531,8 @@ class Client:
         event: Literal['raw_integration_delete'],
         /,
         *,
-        check: Optional[Callable[[RawIntegrationDeleteEvent], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawIntegrationDeleteEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawIntegrationDeleteEvent:
         ...
 
@@ -1535,8 +1544,8 @@ class Client:
         event: Literal['interaction'],
         /,
         *,
-        check: Optional[Callable[[Interaction[Self]], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Interaction[Self]], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Interaction[Self]:
         ...
 
@@ -1548,8 +1557,8 @@ class Client:
         event: Literal['member_join', 'member_remove'],
         /,
         *,
-        check: Optional[Callable[[Member], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Member], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Member:
         ...
 
@@ -1559,8 +1568,8 @@ class Client:
         event: Literal['raw_member_remove'],
         /,
         *,
-        check: Optional[Callable[[RawMemberRemoveEvent], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawMemberRemoveEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawMemberRemoveEvent:
         ...
 
@@ -1570,8 +1579,8 @@ class Client:
         event: Literal['member_update', 'presence_update'],
         /,
         *,
-        check: Optional[Callable[[Member, Member], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Member, Member], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Member, Member]:
         ...
 
@@ -1581,8 +1590,8 @@ class Client:
         event: Literal['user_update'],
         /,
         *,
-        check: Optional[Callable[[User, User], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[User, User], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[User, User]:
         ...
 
@@ -1592,8 +1601,8 @@ class Client:
         event: Literal['member_ban'],
         /,
         *,
-        check: Optional[Callable[[Guild, Union[User, Member]], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Guild, Union[User, Member]], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Guild, Union[User, Member]]:
         ...
 
@@ -1603,8 +1612,8 @@ class Client:
         event: Literal['member_unban'],
         /,
         *,
-        check: Optional[Callable[[Guild, User], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Guild, User], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Guild, User]:
         ...
 
@@ -1616,8 +1625,8 @@ class Client:
         event: Literal['message', 'message_delete'],
         /,
         *,
-        check: Optional[Callable[[Message], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Message], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Message:
         ...
 
@@ -1627,8 +1636,8 @@ class Client:
         event: Literal['message_edit'],
         /,
         *,
-        check: Optional[Callable[[Message, Message], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Message, Message], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Message, Message]:
         ...
 
@@ -1638,8 +1647,8 @@ class Client:
         event: Literal['bulk_message_delete'],
         /,
         *,
-        check: Optional[Callable[[List[Message]], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[List[Message]], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> List[Message]:
         ...
 
@@ -1649,8 +1658,8 @@ class Client:
         event: Literal['raw_message_edit'],
         /,
         *,
-        check: Optional[Callable[[RawMessageUpdateEvent], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawMessageUpdateEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawMessageUpdateEvent:
         ...
 
@@ -1660,8 +1669,8 @@ class Client:
         event: Literal['raw_message_delete'],
         /,
         *,
-        check: Optional[Callable[[RawMessageDeleteEvent], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawMessageDeleteEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawMessageDeleteEvent:
         ...
 
@@ -1671,8 +1680,8 @@ class Client:
         event: Literal['raw_bulk_message_delete'],
         /,
         *,
-        check: Optional[Callable[[RawBulkMessageDeleteEvent], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawBulkMessageDeleteEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawBulkMessageDeleteEvent:
         ...
 
@@ -1684,8 +1693,8 @@ class Client:
         event: Literal['reaction_add', 'reaction_remove'],
         /,
         *,
-        check: Optional[Callable[[Reaction, Union[Member, User]], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Reaction, Union[Member, User]], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Reaction, Union[Member, User]]:
         ...
 
@@ -1695,8 +1704,8 @@ class Client:
         event: Literal['reaction_clear'],
         /,
         *,
-        check: Optional[Callable[[Message, List[Reaction]], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Message, List[Reaction]], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Message, List[Reaction]]:
         ...
 
@@ -1706,8 +1715,8 @@ class Client:
         event: Literal['reaction_clear_emoji'],
         /,
         *,
-        check: Optional[Callable[[Reaction], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Reaction], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Reaction:
         ...
 
@@ -1717,8 +1726,8 @@ class Client:
         event: Literal['raw_reaction_add', 'raw_reaction_remove'],
         /,
         *,
-        check: Optional[Callable[[RawReactionActionEvent], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawReactionActionEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawReactionActionEvent:
         ...
 
@@ -1728,8 +1737,8 @@ class Client:
         event: Literal['raw_reaction_clear'],
         /,
         *,
-        check: Optional[Callable[[RawReactionClearEvent], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawReactionClearEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawReactionClearEvent:
         ...
 
@@ -1739,8 +1748,8 @@ class Client:
         event: Literal['raw_reaction_clear_emoji'],
         /,
         *,
-        check: Optional[Callable[[RawReactionClearEmojiEvent], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawReactionClearEmojiEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawReactionClearEmojiEvent:
         ...
 
@@ -1752,8 +1761,8 @@ class Client:
         event: Literal['guild_role_create', 'guild_role_delete'],
         /,
         *,
-        check: Optional[Callable[[Role], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Role], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Role:
         ...
 
@@ -1763,8 +1772,8 @@ class Client:
         event: Literal['guild_role_update'],
         /,
         *,
-        check: Optional[Callable[[Role, Role], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Role, Role], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Role, Role]:
         ...
 
@@ -1776,8 +1785,8 @@ class Client:
         event: Literal['scheduled_event_create', 'scheduled_event_delete'],
         /,
         *,
-        check: Optional[Callable[[ScheduledEvent], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[ScheduledEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> ScheduledEvent:
         ...
 
@@ -1787,8 +1796,8 @@ class Client:
         event: Literal['scheduled_event_user_add', 'scheduled_event_user_remove'],
         /,
         *,
-        check: Optional[Callable[[ScheduledEvent, User], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[ScheduledEvent, User], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[ScheduledEvent, User]:
         ...
 
@@ -1800,8 +1809,8 @@ class Client:
         event: Literal['stage_instance_create', 'stage_instance_delete'],
         /,
         *,
-        check: Optional[Callable[[StageInstance], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[StageInstance], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> StageInstance:
         ...
 
@@ -1811,8 +1820,8 @@ class Client:
         event: Literal['stage_instance_update'],
         /,
         *,
-        check: Optional[Callable[[StageInstance, StageInstance], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[StageInstance, StageInstance], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Coroutine[Any, Any, Tuple[StageInstance, StageInstance]]:
         ...
 
@@ -1823,8 +1832,8 @@ class Client:
         event: Literal['subscription_create', 'subscription_update', 'subscription_delete'],
         /,
         *,
-        check: Optional[Callable[[Subscription], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Subscription], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Subscription:
         ...
 
@@ -1835,8 +1844,8 @@ class Client:
         event: Literal['thread_create', 'thread_join', 'thread_remove', 'thread_delete'],
         /,
         *,
-        check: Optional[Callable[[Thread], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Thread], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Thread:
         ...
 
@@ -1846,8 +1855,8 @@ class Client:
         event: Literal['thread_update'],
         /,
         *,
-        check: Optional[Callable[[Thread, Thread], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Thread, Thread], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Thread, Thread]:
         ...
 
@@ -1857,8 +1866,8 @@ class Client:
         event: Literal['raw_thread_update'],
         /,
         *,
-        check: Optional[Callable[[RawThreadUpdateEvent], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawThreadUpdateEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawThreadUpdateEvent:
         ...
 
@@ -1868,8 +1877,8 @@ class Client:
         event: Literal['raw_thread_delete'],
         /,
         *,
-        check: Optional[Callable[[RawThreadDeleteEvent], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawThreadDeleteEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawThreadDeleteEvent:
         ...
 
@@ -1879,8 +1888,8 @@ class Client:
         event: Literal['thread_member_join', 'thread_member_remove'],
         /,
         *,
-        check: Optional[Callable[[ThreadMember], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[ThreadMember], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> ThreadMember:
         ...
 
@@ -1890,8 +1899,8 @@ class Client:
         event: Literal['raw_thread_member_remove'],
         /,
         *,
-        check: Optional[Callable[[RawThreadMembersUpdate], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawThreadMembersUpdate], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawThreadMembersUpdate:
         ...
 
@@ -1903,8 +1912,8 @@ class Client:
         event: Literal['voice_state_update'],
         /,
         *,
-        check: Optional[Callable[[Member, VoiceState, VoiceState], bool]],
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Member, VoiceState, VoiceState], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Member, VoiceState, VoiceState]:
         ...
 
@@ -1916,8 +1925,8 @@ class Client:
         event: Literal['poll_vote_add', 'poll_vote_remove'],
         /,
         *,
-        check: Optional[Callable[[Union[User, Member], PollAnswer], bool]] = None,
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Union[User, Member], PollAnswer], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Union[User, Member], PollAnswer]:
         ...
 
@@ -1927,8 +1936,8 @@ class Client:
         event: Literal['raw_poll_vote_add', 'raw_poll_vote_remove'],
         /,
         *,
-        check: Optional[Callable[[RawPollVoteActionEvent], bool]] = None,
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[RawPollVoteActionEvent], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> RawPollVoteActionEvent:
         ...
 
@@ -1940,8 +1949,8 @@ class Client:
         event: Literal["command", "command_completion"],
         /,
         *,
-        check: Optional[Callable[[Context[Any]], bool]] = None,
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Context[Any]], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Context[Any]:
         ...
 
@@ -1951,8 +1960,8 @@ class Client:
         event: Literal["command_error"],
         /,
         *,
-        check: Optional[Callable[[Context[Any], CommandError], bool]] = None,
-        timeout: Optional[float] = None,
+        check: Optional[Callable[[Context[Any], CommandError], bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Tuple[Context[Any], CommandError]:
         ...
 
@@ -1962,8 +1971,8 @@ class Client:
         event: str,
         /,
         *,
-        check: Optional[Callable[..., bool]] = None,
-        timeout: Optional[float] = None,
+        check: Optional[Callable[..., bool]] = ...,
+        timeout: Optional[float] = ...,
     ) -> Any:
         ...
 
@@ -2377,6 +2386,29 @@ class Client:
         """
         data = await self.http.get_guild(guild_id, with_counts=with_counts)
         return Guild(data=data, state=self._connection)
+
+    async def fetch_guild_preview(self, guild_id: int) -> GuildPreview:
+        """|coro|
+
+        Retrieves a preview of a :class:`.Guild` from an ID. If the guild is discoverable,
+        you don't have to be a member of it.
+
+        .. versionadded:: 2.5
+
+        Raises
+        ------
+        NotFound
+            The guild doesn't exist, or is not discoverable and you are not in it.
+        HTTPException
+            Getting the guild failed.
+
+        Returns
+        --------
+        :class:`.GuildPreview`
+            The guild preview from the ID.
+        """
+        data = await self.http.get_guild_preview(guild_id)
+        return GuildPreview(data=data, state=self._connection)
 
     async def create_guild(
         self,
@@ -2823,6 +2855,7 @@ class Client:
         user: Optional[Snowflake] = None,
         guild: Optional[Snowflake] = None,
         exclude_ended: bool = False,
+        exclude_deleted: bool = True,
     ) -> AsyncIterator[Entitlement]:
         """Retrieves an :term:`asynchronous iterator` of the :class:`.Entitlement` that applications has.
 
@@ -2864,6 +2897,10 @@ class Client:
             The guild to filter by.
         exclude_ended: :class:`bool`
             Whether to exclude ended entitlements. Defaults to ``False``.
+        exclude_deleted: :class:`bool`
+            Whether to exclude deleted entitlements. Defaults to ``True``.
+
+            .. versionadded:: 2.5
 
         Raises
         -------
@@ -2900,6 +2937,7 @@ class Client:
                 user_id=user.id if user else None,
                 guild_id=guild.id if guild else None,
                 exclude_ended=exclude_ended,
+                exclude_deleted=exclude_deleted,
             )
 
             if data:
@@ -2948,7 +2986,7 @@ class Client:
             data, state, limit = await strategy(retrieve, state, limit)
 
             # Terminate loop on next iteration; there's no data left after this
-            if len(data) < 1000:
+            if len(data) < 100:
                 limit = 0
 
             for e in data:
@@ -3193,7 +3231,7 @@ class Client:
         Parameters
         ----------
         name: :class:`str`
-            The emoji name. Must be at least 2 characters.
+            The emoji name. Must be between 2 and 32 characters long.
         image: :class:`bytes`
             The :term:`py:bytes-like object` representing the image data to use.
             Only JPG, PNG and GIF images are supported.

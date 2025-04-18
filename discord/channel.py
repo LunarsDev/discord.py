@@ -2493,6 +2493,14 @@ class ForumChannel(discord.abc.GuildChannel, Hashable):
         return ChannelType.text.value
 
     @property
+    def members(self) -> List[Member]:
+        """List[:class:`Member`]: Returns all members that can see this channel.
+
+        .. versionadded:: 2.5
+        """
+        return [m for m in self.guild.members if self.permissions_for(m).read_messages]
+
+    @property
     def _scheduled_event_entity_type(self) -> Optional[EntityType]:
         return None
 
@@ -3528,6 +3536,14 @@ class PartialMessageable(discord.abc.Messageable, Hashable):
         """
 
         return Permissions.none()
+
+    @property
+    def mention(self) -> str:
+        """:class:`str`: Returns a string that allows you to mention the channel.
+
+        .. versionadded:: 2.5
+        """
+        return f'<#{self.id}>'
 
     def get_partial_message(self, message_id: int, /) -> PartialMessage:
         """Creates a :class:`PartialMessage` from the message ID.

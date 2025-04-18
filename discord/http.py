@@ -97,6 +97,7 @@ if TYPE_CHECKING:
         subscription,
     )
     from .types.snowflake import Snowflake, SnowflakeList
+    from .types.gateway import SessionStartLimit
 
     from types import TracebackType
 
@@ -309,7 +310,7 @@ class Route:
         self.metadata: Optional[str] = metadata
         url = self.BASE + self.path
         if parameters:
-            url = url.format_map({k: _uriquote(v) if isinstance(v, str) else v for k, v in parameters.items()})
+            url = url.format_map({k: _uriquote(v, safe='') if isinstance(v, str) else v for k, v in parameters.items()})
         self.url: str = url
 
         # major parameters:
@@ -1452,6 +1453,9 @@ class HTTPClient:
         params = {'with_counts': int(with_counts)}
         return self.request(Route('GET', '/guilds/{guild_id}', guild_id=guild_id), params=params)
 
+    def get_guild_preview(self, guild_id: Snowflake) -> Response[guild.GuildPreview]:
+        return self.request(Route('GET', '/guilds/{guild_id}/preview', guild_id=guild_id))
+
     def delete_guild(self, guild_id: Snowflake) -> Response[None]:
         return self.request(Route('DELETE', '/guilds/{guild_id}', guild_id=guild_id))
 
@@ -2456,6 +2460,7 @@ class HTTPClient:
         limit: Optional[int] = None,
         guild_id: Optional[Snowflake] = None,
         exclude_ended: Optional[bool] = None,
+        exclude_deleted: Optional[bool] = None,
     ) -> Response[List[sku.Entitlement]]:
         params: Dict[str, Any] = {}
 
@@ -2473,6 +2478,8 @@ class HTTPClient:
             params['guild_id'] = guild_id
         if exclude_ended is not None:
             params['exclude_ended'] = int(exclude_ended)
+        if exclude_deleted is not None:
+            params['exclude_deleted'] = int(exclude_deleted)
 
         return self.request(
             Route('GET', '/applications/{application_id}/entitlements', application_id=application_id), params=params
@@ -2613,6 +2620,7 @@ class HTTPClient:
             'cover_image',
             'interactions_endpoint_url ',
             'tags',
+            'integration_types_config',
         )
 
         payload = {k: v for k, v in payload.items() if k in valid_keys}
@@ -2753,13 +2761,13 @@ class HTTPClient:
 
     # Misc
 
-    async def get_bot_gateway(self) -> Tuple[int, str]:
+    async def get_bot_gateway(self) -> Tuple[int, str, SessionStartLimit]:
         try:
             data = await self.request(Route('GET', '/gateway/bot'))
         except HTTPException as exc:
             raise GatewayNotFound() from exc
 
-        return data['shards'], data['url']
+        return data['shards'], data['url'], data['session_start_limit']
 
     def get_user(self, user_id: Snowflake) -> Response[user.User]:
         return self.request(Route('GET', '/users/{user_id}', user_id=user_id))

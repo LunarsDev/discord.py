@@ -75,9 +75,6 @@ import zlib
 
 import yarl
 
-if TYPE_CHECKING:
-    from .user import _UserTag
-
 try:
     import orjson  # type: ignore
 except ModuleNotFoundError:
@@ -108,11 +105,10 @@ __all__ = (
     'format_dt',
     'MISSING',
     'setup_logging',
-    'user_has_nitro',
 )
 
 DISCORD_EPOCH = 1420070400000
-DEFAULT_FILE_SIZE_LIMIT_BYTES = 26214400
+DEFAULT_FILE_SIZE_LIMIT_BYTES = 10485760
 
 
 class _MissingSentinel:
@@ -331,7 +327,7 @@ def oauth_url(
     permissions: Permissions = MISSING,
     guild: Snowflake = MISSING,
     redirect_uri: str = MISSING,
-    scopes: Iterable[str] = MISSING,
+    scopes: Optional[Iterable[str]] = MISSING,
     disable_guild_select: bool = False,
     state: str = MISSING,
 ) -> str:
@@ -373,7 +369,8 @@ def oauth_url(
         The OAuth2 URL for inviting the bot into guilds.
     """
     url = f'https://discord.com/oauth2/authorize?client_id={client_id}'
-    url += '&scope=' + '+'.join(scopes or ('bot', 'applications.commands'))
+    if scopes is not None:
+        url += '&scope=' + '+'.join(scopes or ('bot', 'applications.commands'))
     if permissions is not MISSING:
         url += f'&permissions={permissions.value}'
     if guild is not MISSING:
@@ -717,13 +714,13 @@ async def maybe_coroutine(f: MaybeAwaitableFunc[P, T], *args: P.args, **kwargs: 
     if _isawaitable(value):
         return await value
     else:
-        return value  # type: ignore
+        return value
 
 
 async def async_all(
     gen: Iterable[Union[T, Awaitable[T]]],
     *,
-    check: Callable[[Union[T, Awaitable[T]]], TypeGuard[Awaitable[T]]] = _isawaitable,
+    check: Callable[[Union[T, Awaitable[T]]], TypeGuard[Awaitable[T]]] = _isawaitable,  # type: ignore
 ) -> bool:
     for elem in gen:
         if check(elem):
@@ -872,6 +869,12 @@ def resolve_invite(invite: Union[Invite, str]) -> ResolvedInvite:
     invite: Union[:class:`~discord.Invite`, :class:`str`]
         The invite.
 
+    Raises
+    -------
+    ValueError
+        The invite is not a valid Discord invite, e.g. is not a URL
+        or does not contain alphanumeric characters.
+
     Returns
     --------
     :class:`.ResolvedInvite`
@@ -891,7 +894,12 @@ def resolve_invite(invite: Union[Invite, str]) -> ResolvedInvite:
             event_id = url.query.get('event')
 
             return ResolvedInvite(code, int(event_id) if event_id else None)
-    return ResolvedInvite(invite, None)
+
+        allowed_characters = r'[a-zA-Z0-9\-_]+'
+        if not re.fullmatch(allowed_characters, invite):
+            raise ValueError('Invite contains characters that are not allowed')
+
+        return ResolvedInvite(invite, None)
 
 
 def resolve_template(code: Union[Template, str]) -> str:
@@ -1113,7 +1121,7 @@ def flatten_literal_params(parameters: Iterable[Any]) -> Tuple[Any, ...]:
     literal_cls = type(Literal[0])
     for p in parameters:
         if isinstance(p, literal_cls):
-            params.extend(p.__args__)
+            params.extend(p.__args__)  # type: ignore
         else:
             params.append(p)
     return tuple(params)
@@ -1525,46 +1533,10 @@ def _format_call_duration(duration: datetime.timedelta) -> str:
 
     return formatted
 
-def user_has_nitro(user: _UserTag, /) -> bool:
-    from .user import User
-    from .member import Member
-    from .enums import ActivityType, PremiumType
-    from .partial_emoji import PartialEmoji
-    from .activity import CustomActivity
 
-    if not isinstance(user, (User, Member)):
-        raise TypeError('user argument must be a User or Member')
+class _RawReprMixin:
+    __slots__: Tuple[str, ...] = ()
 
-    if user.premium_type not in (PremiumType.keyerror, PremiumType.none):
-        return True
-
-    def custom_status_check(member: Member, /) -> bool:
-        ca: CustomActivity = find(lambda activity: activity.type is ActivityType.custom, member.activities)  # type: ignore
-        if ca is None:
-            return False
-
-        return isinstance(ca.emoji, PartialEmoji) and ca.emoji.is_custom_emoji()
-
-    def user_checks(user: Union[Member, User], /) -> bool:
-        return any(
-            check not in (False, None)
-            for check in (
-                user.banner,
-                user.avatar_decoration,
-                user.avatar.is_animated() if user.avatar else None,
-            )
-        )
-
-    def member_checks(member: Member, /) -> bool:
-        return any(
-            check not in (False, None)
-            for check in (
-                member.premium_since,
-                custom_status_check(member),
-            )
-        )
-
-    if isinstance(user, User):
-        return user_checks(user)
-
-    return user_checks(user) or member_checks(user)
+    def __repr__(self) -> str:
+        value = ' '.join(f'{attr}={getattr(self, attr)!r}' for attr in self.__slots__)
+        return f'<{self.__class__.__name__} {value}>'
