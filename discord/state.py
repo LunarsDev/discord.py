@@ -394,6 +394,9 @@ class ConnectionState(Generic[DBT, ClientT]):
         else:
             self._messages: Optional[Deque[Message]] = None
 
+        self.loop.create_task(self.load_users_from_db())
+        self.loop.create_task(self.load_members_from_db())
+
     def process_chunk_requests(self, guild_id: int, nonce: Optional[str], members: List[Member], complete: bool) -> None:
         removed = []
         for key, request in self._chunk_requests.items():
@@ -686,8 +689,6 @@ class ConnectionState(Generic[DBT, ClientT]):
             raise
 
     async def _delay_ready(self) -> None:
-        self.loop.create_task(self.load_users_from_db())
-        self.loop.create_task(self.load_members_from_db())
         try:
             states = []
             while True:
