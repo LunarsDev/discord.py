@@ -7,7 +7,7 @@ name = "discord.py"
 description = "A Python wrapper for the Discord API"
 readme = { file = "README.rst", content-type = "text/x-rst" }
 license = { file = "LICENSE" }
-requires-python = ">=3.8"
+requires-python = ">=3.12"
 authors = [{ name = "Rapptz" }]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -58,7 +58,7 @@ speed = [
     "aiodns>=1.1; sys_platform != 'win32'",
     "Brotli",
     "cchardet==2.1.7; python_version < '3.10'",
-    "zstandard>=0.23.0"
+    "zstandard>=0.23.0",
 ]
 test = [
     "coverage[toml]",
@@ -69,10 +69,7 @@ test = [
     "typing-extensions>=4.3,<5",
     "tzdata; sys_platform == 'win32'",
 ]
-dev = [
-    "black==22.6",
-    "typing_extensions>=4.3,<5",
-]
+dev = ["black==22.6", "typing_extensions>=4.3,<5"]
 
 [tool.setuptools]
 packages = [
@@ -91,17 +88,10 @@ line-length = 125
 skip-string-normalization = true
 
 [tool.coverage.run]
-omit = [
-    "discord/__main__.py",
-    "discord/types/*",
-    "*/_types.py",
-]
+omit = ["discord/__main__.py", "discord/types/*", "*/_types.py"]
 
 [tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "@overload",
-]
+exclude_lines = ["pragma: no cover", "@overload"]
 
 [tool.isort]
 profile = "black"
@@ -119,15 +109,10 @@ include = [
     "discord/ext/commands",
     "discord/ext/tasks",
 ]
-exclude = [
-    "**/__pycache__",
-    "build",
-    "dist",
-    "docs",
-]
+exclude = ["**/__pycache__", "build", "dist", "docs"]
 reportUnnecessaryTypeIgnoreComment = "warning"
 reportUnusedImport = "error"
-pythonVersion = "3.8"
+pythonVersion = "3.12"
 typeCheckingMode = "basic"
 
 [tool.pytest.ini_options]

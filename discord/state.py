@@ -51,6 +51,8 @@ import inspect
 
 import os
 
+from asyncpg import Pool, Connection
+
 from .guild import Guild
 from .activity import BaseActivity
 from .sku import Entitlement
@@ -63,7 +65,7 @@ from .channel import *
 from .channel import _channel_factory
 from .raw_models import *
 from .presences import RawPresenceUpdateEvent
-from .member import Member
+from .member import Member, MemberPayload
 from .role import Role
 from .enums import ChannelType, try_enum, Status
 from . import utils
@@ -170,8 +172,8 @@ async def logging_coroutine(coroutine: Coroutine[Any, Any, T], *, info: str) -> 
     except Exception:
         _log.exception('Exception occurred during %s', info)
 
-
-class ConnectionState(Generic[ClientT]):
+DBT = TypeVar('DBT', bound=Union[Pool, Connection])
+class ConnectionState(Generic[DBT, ClientT]):
     if TYPE_CHECKING:
         _get_websocket: Callable[..., DiscordWebSocket]
         _get_client: Callable[..., ClientT]
@@ -184,6 +186,7 @@ class ConnectionState(Generic[ClientT]):
         handlers: Dict[str, Callable[..., Any]],
         hooks: Dict[str, Callable[..., Coroutine[Any, Any, Any]]],
         http: HTTPClient,
+        db: DBT,
         **options: Any,
     ) -> None:
         # Set later, after Client.login
@@ -196,6 +199,7 @@ class ConnectionState(Generic[ClientT]):
         self.dispatch: Callable[..., Any] = dispatch
         self.handlers: Dict[str, Callable[..., Any]] = handlers
         self.hooks: Dict[str, Callable[..., Coroutine[Any, Any, Any]]] = hooks
+        self.db: DBT = db
         self.shard_count: Optional[int] = None
         self._ready_task: Optional[asyncio.Task] = None
         self.application_id: Optional[int] = utils._get_as_snowflake(options, 'application_id')
@@ -294,7 +298,83 @@ class ConnectionState(Generic[ClientT]):
 
         # Purposefully don't call `clear` because users rely on cache being available post-close
 
+    async def user_to_db(self, user: UserPayload) -> None:
+        user_id = int(user["id"])
+        # Upsert the user into the users JSONB column in dpy_cache using SQL
+        await self.db.execute(
+            """
+            UPDATE dpy_cache
+            SET users = COALESCE(users, '{}'::jsonb) || jsonb_build_object($1::text, $2::jsonb)
+            """,
+            str(user_id),
+            user,
+        )
+
+    async def member_to_db(self, guild_id: int, member: gw.MemberWithUser | MemberPayload) -> None:
+        user = member.get("user")
+        if user is None or "id" not in user:
+            return
+        user_id = int(user["id"])
+        # Upsert the member into the members JSONB column in dpy_cache using SQL
+        await self.db.execute(
+            """
+            UPDATE dpy_cache
+            SET members = COALESCE(members, '{}'::jsonb) || 
+            jsonb_build_object($1::text, 
+                COALESCE(members->$1, '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb)
+            )
+            """,
+            str(guild_id),
+            str(user_id),
+            member,
+        )
+
+    async def remove_user_from_db(self, user_id: int) -> None:
+        # Remove the user from the users JSONB column in dpy_cache using a single SQL query
+        await self.db.execute(
+            "UPDATE dpy_cache SET users = COALESCE(users, '{}'::jsonb) - $1",
+            str(user_id),
+        )
+
+    async def remove_member_from_db(self, guild_id: int, user_id: int) -> None:
+        # Remove the member from the members JSONB column in dpy_cache using a single SQL query
+        await self.db.execute(
+            """
+            UPDATE dpy_cache
+            SET members = COALESCE(members, '{}'::jsonb) - $1::text || jsonb_build_object($2::text, '{}'::jsonb)
+            """,
+            str(guild_id),
+            str(user_id),
+        )
+
+    async def load_users_from_db(self) -> None:
+        # Load all users from the users JSONB column in dpy_cache using SQL
+        result = await self.db.fetch("SELECT users FROM dpy_cache WHERE users IS NOT NULL")
+        count = sum(len(row["users"]) for row in result if row["users"])
+        [self.store_user(user_data, cache=False) for row in result if row["users"] for user_data in row["users"].values()]
+        print(f"Loaded {count} users from the database.")
+
+    async def load_members_from_db(self) -> None:
+        # Load all members from the members JSONB column in dpy_cache using SQL
+        result = await self.db.fetch("SELECT members FROM dpy_cache WHERE members IS NOT NULL")
+        total = 0
+        for row in result:
+            members_json = row["members"]
+            if not members_json:
+                continue
+
+            for guild_id, members in members_json.items():
+                guild = self._get_or_create_unavailable_guild(int(guild_id))
+                self._add_guild(guild)
+                for _, member_data in members.items():
+                    member = Member(guild=guild, data=member_data, state=self)
+                    if self.member_cache_flags.joined:
+                        guild._add_member(member)
+                    total += 1
+        print(f"Loaded {total} members from the database.")
+
     def clear(self, *, views: bool = True) -> None:
+        self._chunk_requests.clear()
         self.user: Optional[ClientUser] = None
         self._users: weakref.WeakValueDictionary[int, User] = weakref.WeakValueDictionary()
         self._emojis: Dict[int, Emoji] = {}
@@ -606,6 +686,8 @@ class ConnectionState(Generic[ClientT]):
             raise
 
     async def _delay_ready(self) -> None:
+        self.loop.create_task(self.load_users_from_db())
+        self.loop.create_task(self.load_members_from_db())
         try:
             states = []
             while True:
@@ -856,6 +938,7 @@ class ConnectionState(Generic[ClientT]):
         self.dispatch('presence_update', old_member, member)
 
     def parse_user_update(self, data: gw.UserUpdateEvent) -> None:
+        self.loop.create_task(self.user_to_db(data))
         if self.user:
             self.user._update(data)
 
@@ -1101,6 +1184,8 @@ class ConnectionState(Generic[ClientT]):
             _log.debug('GUILD_MEMBER_ADD referencing an unknown guild ID: %s. Discarding.', data['guild_id'])
             return
 
+        self.loop.create_task(self.member_to_db(guild.id, data))  # type: ignore
+        self.loop.create_task(self.user_to_db(data['user']))
         member = Member(guild=guild, data=data, state=self)
         if self.member_cache_flags.joined:
             guild._add_member(member)
@@ -1114,6 +1199,7 @@ class ConnectionState(Generic[ClientT]):
         user = self.store_user(data['user'])
         raw = RawMemberRemoveEvent(data, user)
 
+        self.loop.create_task(self.remove_member_from_db(raw.guild_id, user.id))
         guild = self._get_guild(raw.guild_id)
         if guild is not None:
             if guild._member_count is not None:
@@ -1133,6 +1219,9 @@ class ConnectionState(Generic[ClientT]):
         guild = self._get_guild(int(data['guild_id']))
         user = data['user']
         user_id = int(user['id'])
+
+        self.loop.create_task(self.member_to_db(guild.id, data))  # type: ignore
+        self.loop.create_task(self.user_to_db(user))
         if guild is None:
             _log.debug('GUILD_MEMBER_UPDATE referencing an unknown guild ID: %s. Discarding.', data['guild_id'])
             return
@@ -1424,6 +1513,10 @@ class ConnectionState(Generic[ClientT]):
         guild_id = int(data['guild_id'])
         guild = self._get_guild(guild_id)
         presences = data.get('presences', [])
+
+        if members := data.get('members'):
+            for member in members:
+                self.loop.create_task(self.member_to_db(guild_id, member)) 
 
         if guild is None:
             return

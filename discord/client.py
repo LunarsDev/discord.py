@@ -79,6 +79,8 @@ from .threads import Thread
 from .sticker import GuildSticker, StandardSticker, StickerPack, _sticker_factory
 from .soundboard import SoundboardDefaultSound, SoundboardSound
 
+from asyncpg import Pool, Connection
+
 if TYPE_CHECKING:
     from types import TracebackType
 
@@ -150,7 +152,7 @@ class _LoopSentinel:
 _loop: Any = _LoopSentinel()
 
 
-class Client:
+class Client[DB: Pool | Connection]:
     r"""Represents a client connection that connects to Discord.
     This class is used to interact with the Discord WebSocket and API.
 
@@ -272,7 +274,7 @@ class Client:
         The websocket gateway the client is currently connected to. Could be ``None``.
     """
 
-    def __init__(self, *, intents: Intents, **options: Any) -> None:
+    def __init__(self, *, intents: Intents, db: DB, **options: Any) -> None:
         self.loop: asyncio.AbstractEventLoop = _loop
         # self.ws is set in the connect method
         self.ws: DiscordWebSocket = None  # type: ignore
@@ -312,6 +314,10 @@ class Client:
         self._application: Optional[AppInfo] = None
         self._connection._get_websocket = self._get_websocket
         self._connection._get_client = lambda: self
+
+        self.db: DB = db
+        if not isinstance(self.db, (Pool, Connection)):
+            raise TypeError(f"db must be an instance of Pool or Connection, not {self.db!r}")
 
         if VoiceClient.warn_nacl:
             VoiceClient.warn_nacl = False
