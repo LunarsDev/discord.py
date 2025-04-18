@@ -62,6 +62,7 @@ from . import errors
 from .help import HelpCommand, DefaultHelpCommand
 from .cog import Cog
 from .hybrid import hybrid_command, hybrid_group, HybridCommand, HybridGroup
+from ..._types import DatabaseT
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -79,6 +80,7 @@ if TYPE_CHECKING:
         ContextT,
         MaybeAwaitableFunc,
     )
+    
     from .core import Command
     from .hybrid import CommandCallback, ContextT, P
 
@@ -157,8 +159,7 @@ class _DefaultRepr:
 
 _default: Any = _DefaultRepr()
 
-
-class BotBase(GroupMixin[None]):
+class BotBase[DatabaseT](GroupMixin[None]):
     def __init__(
         self,
         command_prefix: PrefixType[BotT],
@@ -169,9 +170,10 @@ class BotBase(GroupMixin[None]):
         allowed_contexts: app_commands.AppCommandContext = MISSING,
         allowed_installs: app_commands.AppInstallationType = MISSING,
         intents: discord.Intents,
+        database: DatabaseT | None = None,
         **options: Any,
     ) -> None:
-        super().__init__(intents=intents, **options)
+        super().__init__(intents=intents, database=database, **options)
         self.command_prefix: PrefixType[BotT] = command_prefix  # type: ignore
         self.extra_events: Dict[str, List[CoroFunc]] = {}
         # Self doesn't have the ClientT bound, but since this is a mixin it technically does
@@ -1168,6 +1170,7 @@ class BotBase(GroupMixin[None]):
         else:
             self._help_command = None
 
+
     # application command interop
 
     # As mentioned above, this is a mixin so the Self type hint fails here.
@@ -1411,7 +1414,7 @@ class BotBase(GroupMixin[None]):
         await self.process_commands(message)
 
 
-class Bot(BotBase, discord.Client):
+class Bot(BotBase[DatabaseT], discord.Client[DatabaseT]):
     """Represents a Discord bot.
 
     This class is a subclass of :class:`discord.Client` and as a result
@@ -1514,7 +1517,7 @@ class Bot(BotBase, discord.Client):
     pass
 
 
-class AutoShardedBot(BotBase, discord.AutoShardedClient):
+class AutoShardedBot(BotBase[DatabaseT], discord.AutoShardedClient[DatabaseT]):
     """This is similar to :class:`.Bot` except that it is inherited from
     :class:`discord.AutoShardedClient` instead.
 

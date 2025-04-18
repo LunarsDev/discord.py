@@ -23,12 +23,43 @@ DEALINGS IN THE SOFTWARE.
 """
 
 from __future__ import annotations
-from typing import TypeVar, TYPE_CHECKING
+from typing import Any, Protocol, TypeVar, TYPE_CHECKING
+
+import asyncpg
 
 if TYPE_CHECKING:
     from typing_extensions import TypeVar
     from .client import Client
 
-    ClientT = TypeVar('ClientT', bound=Client, covariant=True, default=Client)
+    ClientT = TypeVar("ClientT", bound=Client, covariant=True, default=Client)
 else:
-    ClientT = TypeVar('ClientT', bound='Client', covariant=True)
+    ClientT = TypeVar("ClientT", bound="Client", covariant=True)
+
+
+class AsyncpgDatabase[RecordT: asyncpg.Record](Protocol):
+    async def fetch(self, query: str, *args: Any) -> list[RecordT]: ...
+
+    async def fetchrow(self, query: str, *args: Any) -> RecordT | None: ...
+
+    async def fetchval(self, query: str, *args: Any) -> Any: ...
+
+    async def execute(self, query: str, *args: Any) -> str: ...
+
+    async def executemany(self, query: str, *args: Any) -> str: ...
+
+
+if TYPE_CHECKING:
+    from typing_extensions import TypeVar
+
+    DatabaseT = TypeVar(
+        "DatabaseT",
+        bound=AsyncpgDatabase[asyncpg.Record] | None,
+        covariant=True,
+        default=None,
+    )
+else:
+    DatabaseT = TypeVar(
+        "DatabaseT",
+        bound=AsyncpgDatabase[asyncpg.Record] | None,
+        covariant=True,
+    )

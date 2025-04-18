@@ -78,8 +78,7 @@ from .stage_instance import StageInstance
 from .threads import Thread
 from .sticker import GuildSticker, StandardSticker, StickerPack, _sticker_factory
 from .soundboard import SoundboardDefaultSound, SoundboardSound
-
-from asyncpg import Pool, Connection
+from ._types import DatabaseT
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -152,7 +151,7 @@ class _LoopSentinel:
 _loop: Any = _LoopSentinel()
 
 
-class Client:
+class Client[DatabaseT]:
     r"""Represents a client connection that connects to Discord.
     This class is used to interact with the Discord WebSocket and API.
 
@@ -274,7 +273,7 @@ class Client:
         The websocket gateway the client is currently connected to. Could be ``None``.
     """
 
-    def __init__(self, *, intents: Intents, **options: Any) -> None:
+    def __init__(self, *, intents: Intents, database: DatabaseT = None, **options: Any) -> None:
         self.loop: asyncio.AbstractEventLoop = _loop
         # self.ws is set in the connect method
         self.ws: DiscordWebSocket = None  # type: ignore
@@ -307,7 +306,7 @@ class Client:
         }
 
         self._enable_debug_events: bool = options.pop('enable_debug_events', False)
-        self._connection: ConnectionState[Self] = self._get_state(intents=intents, **options)
+        self._connection: ConnectionState[DatabaseT, Self] = self._get_state(intents=intents, database=database, **options)
         self._connection.shard_count = self.shard_count
         self._closing_task: Optional[asyncio.Task[None]] = None
         self._ready: asyncio.Event = MISSING
@@ -340,7 +339,7 @@ class Client:
     def _get_websocket(self, guild_id: Optional[int] = None, *, shard_id: Optional[int] = None) -> DiscordWebSocket:
         return self.ws
 
-    def _get_state(self, **options: Any) -> ConnectionState[Self]:
+    def _get_state(self, **options: Any) -> ConnectionState[DatabaseT, Self]:
         return ConnectionState(dispatch=self.dispatch, handlers=self._handlers, hooks=self._hooks, http=self.http, **options)
 
     def _handle_ready(self) -> None:
@@ -366,6 +365,10 @@ class Client:
         if self.ws:
             return self.ws.is_ratelimited()
         return False
+    
+    @property
+    def database(self) -> DatabaseT:
+        return self._connection.database
 
     @property
     def user(self) -> Optional[ClientUser]:

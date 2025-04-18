@@ -41,6 +41,7 @@ from .errors import (
     ConnectionClosed,
     PrivilegedIntentsRequired,
 )
+from ._types import DatabaseT
 
 from .enums import Status
 
@@ -322,7 +323,7 @@ class SessionStartLimits:
         self.max_concurrency: int = kwargs['max_concurrency']
 
 
-class AutoShardedClient(Client):
+class AutoShardedClient(Client[DatabaseT]):
     """A client similar to :class:`Client` except it handles the complications
     of sharding for the user into a more manageable and transparent single
     process bot.
@@ -365,12 +366,12 @@ class AutoShardedClient(Client):
     if TYPE_CHECKING:
         _connection: AutoShardedConnectionState
 
-    def __init__(self, *args: Any, intents: Intents, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, intents: Intents, database: DatabaseT | None = None, **kwargs: Any) -> None:
         kwargs.pop('shard_id', None)
         self.shard_ids: Optional[List[int]] = kwargs.pop('shard_ids', None)
         self.shard_connect_timeout: Optional[float] = kwargs.pop('shard_connect_timeout', 180.0)
 
-        super().__init__(*args, intents=intents, **kwargs)
+        super().__init__(*args, intents=intents, database=database, **kwargs)
 
         if self.shard_ids is not None:
             if self.shard_count is None:
