@@ -65,7 +65,7 @@ from .channel import *
 from .channel import _channel_factory
 from .raw_models import *
 from .presences import RawPresenceUpdateEvent
-from .member import Member, MemberPayload
+from .member import Member
 from .role import Role
 from .enums import ChannelType, try_enum, Status
 from . import utils
@@ -310,7 +310,7 @@ class ConnectionState(Generic[DBT, ClientT]):
             user,
         )
 
-    async def member_to_db(self, guild_id: int, member: gw.MemberWithUser | MemberPayload) -> None:
+    async def member_to_db(self, guild_id: int, member: gw.MemberWithUser) -> None:
         user = member.get("user")
         if user is None or "id" not in user:
             return
