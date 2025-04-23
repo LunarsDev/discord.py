@@ -25,6 +25,7 @@ DEALINGS IN THE SOFTWARE.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections import deque, OrderedDict
 import copy
 import logging
