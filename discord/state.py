@@ -394,35 +394,39 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
     async def load_users_from_db(self) -> None:
         """
         Stream users from discord_users (user_id, data JSONB),
-        ensuring each payload has an 'id', then invoke store_user.
-        Skips any rows where `data` isn’t a dict.
+        unwrap any nested member payloads, ensure each has an 'id',
+        then invoke store_user for each valid record.
         """
-        # If there's no database attached, bail out early.
-        if not getattr(self, 'database', None):
+        # Bail out if no database is configured
+        if not getattr(self, "database", None):
             logging.warning("DB unavailable, skipping load users")
             return
 
         try:
-            # Pull both user_id and the JSONB column
             rows = await self.database.fetch(
                 "SELECT user_id, data FROM discord_users"
             )
             loaded = 0
 
             for rec in rows:
-                data = rec.get('data')
+                data = rec.get("data")
 
-                # Must be a dict
+                # Unwrap guild‐member payloads (which nest user info under 'user')
+                if isinstance(data, dict) and "username" not in data and "user" in data:
+                    inner = data["user"]
+                    if isinstance(inner, dict):
+                        data = inner
+
+                # Skip anything that isn’t a dict at this point
                 if not isinstance(data, dict):
                     logging.warning("Skipping non-dict user record: %r", data)
                     continue
 
-                # If the JSON payload lacks 'id', inject it from user_id
-                if 'id' not in data:
-                    # Discord payloads expect 'id' as a string
-                    data['id'] = str(rec['user_id'])
+                # Inject an 'id' if missing, using the guaranteed user_id PK
+                if "id" not in data:
+                    data["id"] = str(rec["user_id"])
 
-                # Hand off to the existing store_user (which does int(data['id']))
+                # Hand off to store_user (which will int(data['id']) internally)
                 self.store_user(data, cache=False)
                 loaded += 1
 
@@ -430,7 +434,6 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
 
         except Exception as e:
             logging.exception("Failed to load users: %s", e)
-
 
     async def load_members_from_db(self) -> None:
         """
