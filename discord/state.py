@@ -310,10 +310,10 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         try:
             await self.database.execute(
                 """
-                INSERT INTO dpy_cache (users)
-                VALUES (jsonb_build_object($1, $2::jsonb))
+                INSERT INTO dpy_cache (id, users)
+                VALUES (1, jsonb_build_object($1::text, $2::jsonb))
                 ON CONFLICT (id) DO UPDATE
-                SET users = COALESCE(dpy_cache.users, '{}'::jsonb) || jsonb_build_object($1, $2::jsonb)
+                SET users = COALESCE(dpy_cache.users, '{}'::jsonb) || jsonb_build_object($1::text, $2::jsonb)
                 """,
                 user_id,
                 user,
@@ -337,11 +337,14 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         try:
             await self.database.execute(
                 """
-                INSERT INTO dpy_cache (members)
-                VALUES (jsonb_build_object($1, jsonb_build_object($2, $3::jsonb)))
+                INSERT INTO dpy_cache (id, members)
+                VALUES (1, jsonb_build_object($1::text, jsonb_build_object($2::text, $3::jsonb)))
                 ON CONFLICT (id) DO UPDATE
                 SET members = COALESCE(dpy_cache.members, '{}'::jsonb) ||
-                    jsonb_build_object($1, COALESCE(dpy_cache.members->$1, '{}'::jsonb) || jsonb_build_object($2, $3::jsonb))
+                    jsonb_build_object(
+                        $1::text,
+                        COALESCE(dpy_cache.members->$1::text, '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb)
+                    )
                 """,
                 guild_id_str,
                 user_id,
@@ -358,7 +361,7 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         logging.debug("Removing user %s from the database", user_id)
         try:
             await self.database.execute(
-                "UPDATE dpy_cache SET users = COALESCE(users, '{}'::jsonb) - $1",
+                "UPDATE dpy_cache SET users = COALESCE(users, '{}'::jsonb) - $1::text WHERE id = 1",
                 str(user_id),
             )
         except Exception as e:
@@ -376,10 +379,10 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
                 UPDATE dpy_cache
                 SET members = jsonb_set(
                     COALESCE(members, '{}'::jsonb),
-                    ARRAY[$1],
-                    (COALESCE(members->$1, '{}'::jsonb) - $2)
+                    ARRAY[$1::text],  -- Explicit cast for guild_id (text)
+                    (COALESCE(members->$1::text, '{}'::jsonb) - $2::text)
                 )
-
+                WHERE id = 1  -- Critical
                 """,
                 str(guild_id),
                 str(user_id),
@@ -394,15 +397,31 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
 
         logging.info("Loading users from the database")
         try:
-            result = await self.database.fetch("SELECT users FROM dpy_cache WHERE users IS NOT NULL")
+            # Fetch the single row with id=1
+            row = await self.database.fetchrow("SELECT users FROM dpy_cache WHERE id = 1")
+            if not row:
+                logging.info("No cache row found in database")
+                return
+
+            users_json = row.get("users")
+            if not users_json:
+                logging.info("No users found in cache")
+                return
+
             count = 0
-            for row in result:
-                users_json = row.get("users")
-                if users_json:
-                    for user_data in users_json.values():
-                        self.store_user(user_data, cache=False)
-                        count += 1
-            logging.info("Loaded %d users from the database.", count)
+            for user_id_str, user_data in users_json.items():
+                try:
+                    # Validate user_data before storing
+                    if not isinstance(user_data, dict) or "id" not in user_data:
+                        logging.warning("Skipping invalid user data for key %s", user_id_str)
+                        continue
+
+                    self.store_user(user_data, cache=False)
+                    count += 1
+                except Exception as e:
+                    logging.exception("Failed to load user %s: %s", user_id_str, e)
+
+            logging.info("Loaded %d users from the database", count)
         except Exception as e:
             logging.exception("Failed to load users from database: %s", e)
 
@@ -413,55 +432,31 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
 
         logging.info("Loading members from the database")
         try:
-            result = await self.database.fetch("SELECT members FROM dpy_cache WHERE members IS NOT NULL")
+            # Changed query to target id=1
+            result = await self.database.fetch("SELECT members FROM dpy_cache WHERE id = 1")
             total = 0
             for row in result:
                 members_json = row.get("members")
                 if not members_json:
                     continue
 
-                for guild_id, members in members_json.items():
+                for guild_id_str, guild_members in members_json.items():
                     try:
-                        guild = self._get_or_create_unavailable_guild(int(guild_id))
+                        guild_id = int(guild_id_str)
+                        guild = self._get_or_create_unavailable_guild(guild_id)
                         self._add_guild(guild)
-                        for member_data in members.values():
+                        # Iterate over members in this guild
+                        for user_id_str, member_data in guild_members.items():
                             member = Member(guild=guild, data=member_data, state=self)
                             if self.member_cache_flags.joined:
                                 guild._add_member(member)
                             total += 1
                     except Exception as e:
-                        logging.exception("Failed to load members for guild %s: %s", guild_id, e)
+                        logging.exception("Failed to load members for guild %s: %s", guild_id_str, e)
             logging.info("Loaded %d members from the database.", total)
         except Exception as e:
             logging.exception("Failed to load members from database: %s", e)
 
-        if not self.database:
-            logging.warning("Database connection not available, skipping loading members")
-            return
-    
-        logging.info("Loading members from the database")
-        try:
-            result = await self.database.fetch("SELECT members FROM dpy_cache WHERE id = 1 AND members IS NOT NULL")
-            total = 0
-            for row in result:
-                members_json = row.get("members")
-                if not members_json:
-                    continue
-    
-                for guild_id, members in members_json.items():
-                    try:
-                        guild = self._get_or_create_unavailable_guild(int(guild_id))
-                        self._add_guild(guild)
-                        for member_data in members.values():
-                            member = Member(guild=guild, data=member_data, state=self)
-                            if self.member_cache_flags.joined:
-                                guild._add_member(member)
-                            total += 1
-                    except Exception as e:
-                        logging.exception("Failed to load members for guild %s: %s", guild_id, e)
-            logging.info("Loaded %d members from the database.", total)
-        except Exception as e:
-            logging.exception("Failed to load members from database: %s", e)
     def clear(self, *, views: bool = True) -> None:
         self._chunk_requests.clear()
         self.user: Optional[ClientUser] = None
