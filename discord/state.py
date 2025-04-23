@@ -300,20 +300,19 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         if not self.database:
             logging.warning("Database not available, skipping user storage")
             return
-
+    
         user_id = str(user.get("id"))
         if not user_id:
             logging.warning("User payload missing 'id', skipping: %s", user)
             return
-
+    
         logging.debug("Storing user %s in the database", user_id)
         try:
             await self.database.execute(
                 """
-                INSERT INTO dpy_cache (users)
-                VALUES (jsonb_build_object($1, $2::jsonb))
-                ON CONFLICT (id) DO UPDATE
-                SET users = COALESCE(dpy_cache.users, '{}'::jsonb) || jsonb_build_object($1, $2::jsonb)
+                UPDATE dpy_cache
+                SET users = COALESCE(users, '{}'::jsonb) || jsonb_build_object($1, $2::jsonb)
+                WHERE id = 1
                 """,
                 user_id,
                 user,
@@ -325,23 +324,22 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         if not self.database:
             logging.warning("Database connection not available, skipping member storage")
             return
-
+    
         user = member.get("user")
         user_id = str(user.get("id")) if user and "id" in user else None
         guild_id_str = str(guild_id)
         if not user_id:
             logging.warning("Member payload missing user id, skipping: %s", member)
             return
-
+    
         logging.debug("Storing member %s in guild %s in the database", user_id, guild_id_str)
         try:
             await self.database.execute(
                 """
-                INSERT INTO dpy_cache (members)
-                VALUES (jsonb_build_object($1, jsonb_build_object($2, $3::jsonb)))
-                ON CONFLICT (id) DO UPDATE
-                SET members = COALESCE(dpy_cache.members, '{}'::jsonb) ||
-                    jsonb_build_object($1, COALESCE(dpy_cache.members->$1, '{}'::jsonb) || jsonb_build_object($2, $3::jsonb))
+                UPDATE dpy_cache
+                SET members = COALESCE(members, '{}'::jsonb) ||
+                    jsonb_build_object($1, COALESCE(members->$1, '{}'::jsonb) || jsonb_build_object($2, $3::jsonb))
+                WHERE id = 1
                 """,
                 guild_id_str,
                 user_id,
@@ -354,11 +352,11 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         if not self.database:
             logging.warning("Database connection not available, skipping user removal")
             return
-
+    
         logging.debug("Removing user %s from the database", user_id)
         try:
             await self.database.execute(
-                "UPDATE dpy_cache SET users = COALESCE(users, '{}'::jsonb) - $1",
+                "UPDATE dpy_cache SET users = COALESCE(users, '{}'::jsonb) - $1 WHERE id = 1",
                 str(user_id),
             )
         except Exception as e:
@@ -368,7 +366,7 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         if not self.database:
             logging.warning("Database connection not available, skipping member removal")
             return
-
+    
         logging.debug("Removing member %s from guild %s in the database", user_id, guild_id)
         try:
             await self.database.execute(
@@ -379,21 +377,22 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
                     ARRAY[$1],
                     (COALESCE(members->$1, '{}'::jsonb) - $2)
                 )
+                WHERE id = 1
                 """,
                 str(guild_id),
                 str(user_id),
             )
         except Exception as e:
             logging.exception("Failed to remove member %s from guild %s: %s", user_id, guild_id, e)
-
+        
     async def load_users_from_db(self) -> None:
         if not self.database:
             logging.warning("Database connection not available, skipping loading users")
             return
-
+    
         logging.info("Loading users from the database")
         try:
-            result = await self.database.fetch("SELECT users FROM dpy_cache WHERE users IS NOT NULL")
+            result = await self.database.fetch("SELECT users FROM dpy_cache WHERE id = 1 AND users IS NOT NULL")
             count = 0
             for row in result:
                 users_json = row.get("users")
@@ -409,16 +408,16 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         if not self.database:
             logging.warning("Database connection not available, skipping loading members")
             return
-
+    
         logging.info("Loading members from the database")
         try:
-            result = await self.database.fetch("SELECT members FROM dpy_cache WHERE members IS NOT NULL")
+            result = await self.database.fetch("SELECT members FROM dpy_cache WHERE id = 1 AND members IS NOT NULL")
             total = 0
             for row in result:
                 members_json = row.get("members")
                 if not members_json:
                     continue
-
+    
                 for guild_id, members in members_json.items():
                     try:
                         guild = self._get_or_create_unavailable_guild(int(guild_id))
@@ -433,7 +432,6 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
             logging.info("Loaded %d members from the database.", total)
         except Exception as e:
             logging.exception("Failed to load members from database: %s", e)
-
     def clear(self, *, views: bool = True) -> None:
         self._chunk_requests.clear()
         self.user: Optional[ClientUser] = None
