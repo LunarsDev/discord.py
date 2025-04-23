@@ -374,41 +374,41 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         except Exception as e:
             logging.error("Failed to remove member %s: %s", user_id, e)
         
-        async def load_users_from_db(self) -> None:
-            if not self.database:
-                logging.warning("Database connection not available, skipping loading users")
+    async def load_users_from_db(self) -> None:
+        if not self.database:
+            logging.warning("Database connection not available, skipping loading users")
+            return
+
+        logging.info("Loading users from the database")
+        try:
+            # Fetch the single row with id=1
+            row = await self.database.fetchrow("SELECT users FROM dpy_cache WHERE id = 1")
+            if not row:
+                logging.info("No cache row found in database")
                 return
-    
-            logging.info("Loading users from the database")
-            try:
-                # Fetch the single row with id=1
-                row = await self.database.fetchrow("SELECT users FROM dpy_cache WHERE id = 1")
-                if not row:
-                    logging.info("No cache row found in database")
-                    return
-    
-                users_json = row.get("users")
-                if not users_json:
-                    logging.info("No users found in cache")
-                    return
-    
-                count = 0
-                for user_id_str, user_data in users_json.items():
-                    try:
-                        # Validate user_data before storing
-                        if not isinstance(user_data, dict) or "id" not in user_data:
-                            logging.warning("Skipping invalid user data for key %s", user_id_str)
-                            continue
-    
-                        self.store_user(user_data, cache=False)
-                        count += 1
-                    except Exception as e:
-                        logging.exception("Failed to load user %s: %s", user_id_str, e)
-    
-                logging.info("Loaded %d users from the database", count)
-            except Exception as e:
-                logging.exception("Failed to load users from database: %s", e)
-    
+
+            users_json = row.get("users")
+            if not users_json:
+                logging.info("No users found in cache")
+                return
+
+            count = 0
+            for user_id_str, user_data in users_json.items():
+                try:
+                    # Validate user_data before storing
+                    if not isinstance(user_data, dict) or "id" not in user_data:
+                        logging.warning("Skipping invalid user data for key %s", user_id_str)
+                        continue
+
+                    self.store_user(user_data, cache=False)
+                    count += 1
+                except Exception as e:
+                    logging.exception("Failed to load user %s: %s", user_id_str, e)
+
+            logging.info("Loaded %d users from the database", count)
+        except Exception as e:
+            logging.exception("Failed to load users from database: %s", e)
+
     async def load_members_from_db(self) -> None:
         if not self.database:
             return
