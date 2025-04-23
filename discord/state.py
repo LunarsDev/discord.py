@@ -297,76 +297,91 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
 
         # Purposefully don't call `clear` because users rely on cache being available post-close
 
-    async def user_to_db(self, user: UserPayload) -> None:
-        if not self.database:
+
+    async def user_to_db(self, user: Dict[str, Any]) -> None:
+        """
+        Upsert a user into discord_users using asyncpg's implicit statement caching.
+        """
+        if not getattr(self, 'database', None):
             logging.warning("Database unavailable")
             return
-    
-        user_id = user.get("id")
-        if not user_id:
+
+        uid = user.get('id')
+        if not uid:
             logging.warning("User missing ID: %s", user)
             return
-    
+
         try:
             await self.database.execute(
                 """
                 INSERT INTO discord_users (user_id, data)
                 VALUES ($1, $2)
-                ON CONFLICT (user_id) DO UPDATE SET data = EXCLUDED.data
+                ON CONFLICT (user_id) DO UPDATE
+                  SET data = EXCLUDED.data
                 """,
-                int(user_id),
-                json.dumps(user)
+                int(uid),
+                user  # auto-converted to JSONB
             )
         except Exception as e:
-            logging.error("Failed to store user %s: %s", user_id, e)
-    
-    async def member_to_db(self, guild_id: int, member: gw.MemberWithUser) -> None:
-        if not self.database:
+            logging.error("Failed to store user %s: %s", uid, e)
+
+    async def member_to_db(self, guild_id: int, member: Dict[str, Any]) -> None:
+        """
+        Upsert both user and member in one CTE to halve round trips.
+        """
+        if not getattr(self, 'database', None):
             return
-    
-        user = member.get("user")
-        if not user or "id" not in user:
-            logging.warning("Invalid member: %s", member)
+
+        user = member.get('user')
+        if not user or 'id' not in user:
+            logging.warning("Invalid member payload: %s", member)
             return
-    
-        user_id = int(user["id"])
+
+        uid = int(user['id'])
         try:
-            # Upsert user first
-            await self.user_to_db(user)
-            
-            # Upsert member
             await self.database.execute(
                 """
+                WITH upsert_user AS (
+                  INSERT INTO discord_users (user_id, data)
+                  VALUES ($1, $3)
+                  ON CONFLICT (user_id) DO UPDATE
+                    SET data = EXCLUDED.data
+                )
                 INSERT INTO discord_members (guild_id, user_id, data)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (guild_id, user_id) DO UPDATE SET data = EXCLUDED.data
+                VALUES ($2, $1, $3)
+                ON CONFLICT (guild_id, user_id) DO UPDATE
+                  SET data = EXCLUDED.data
                 """,
+                uid,
                 guild_id,
-                user_id,
-                json.dumps(member)
+                member
             )
         except Exception as e:
-            logging.error("Failed to store member %s: %s", user_id, e)
-    
-        
-        async def remove_user_from_db(self, user_id: int) -> None:
-            if not self.database:
-                logging.warning("Database connection not available, skipping user removal")
-                return
-    
-            logging.debug("Removing user %s from the database", user_id)
-            try:
-                await self.database.execute(
-                    "UPDATE dpy_cache SET users = COALESCE(users, '{}'::jsonb) - $1::text WHERE id = 1",
-                    str(user_id),
-                )
-            except Exception as e:
-                logging.exception("Failed to remove user %s from database: %s", user_id, e)
-    
-    async def remove_member_from_db(self, guild_id: int, user_id: int) -> None:
-        if not self.database:
+            logging.error("Failed to store member %s in guild %s: %s", uid, guild_id, e)
+
+    async def remove_user_from_db(self, user_id: int) -> None:
+        """
+        Remove a user row rather than juggling a JSON blob.
+        """
+        if not getattr(self, 'database', None):
+            logging.warning("DB unavailable, skipping user removal")
             return
-    
+
+        try:
+            await self.database.execute(
+                "DELETE FROM discord_users WHERE user_id = $1",
+                user_id
+            )
+        except Exception as e:
+            logging.exception("Failed to remove user %s: %s", user_id, e)
+
+    async def remove_member_from_db(self, guild_id: int, user_id: int) -> None:
+        """
+        Delete a specific member row.
+        """
+        if not getattr(self, 'database', None):
+            return
+
         try:
             await self.database.execute(
                 "DELETE FROM discord_members WHERE guild_id = $1 AND user_id = $2",
@@ -374,69 +389,45 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
                 user_id
             )
         except Exception as e:
-            logging.error("Failed to remove member %s: %s", user_id, e)
-        
+            logging.error("Failed to remove member %s from guild %s: %s", user_id, guild_id, e)
+
     async def load_users_from_db(self) -> None:
-        if not self.database:
-            logging.warning("Database connection not available, skipping loading users")
+        """
+        Stream users from discord_users, invoking store_user for each.
+        """
+        if not getattr(self, 'database', None):
+            logging.warning("DB unavailable, skipping load users")
             return
 
-        logging.info("Loading users from the database")
         try:
-            # Fetch the single row with id=1
-            row = await self.database.fetchrow("SELECT users FROM dpy_cache WHERE id = 1")
-            if not row:
-                logging.info("No cache row found in database")
-                return
-
-            users_json = row.get("users")
-            if not users_json:
-                logging.info("No users found in cache")
-                return
-
-            count = 0
-            for user_id_str, user_data in users_json.items():
-                try:
-                    # Validate user_data before storing
-                    if not isinstance(user_data, dict) or "id" not in user_data:
-                        logging.warning("Skipping invalid user data for key %s", user_id_str)
-                        continue
-
-                    self.store_user(user_data, cache=False)
-                    count += 1
-                except Exception as e:
-                    logging.exception("Failed to load user %s: %s", user_id_str, e)
-
-            logging.info("Loaded %d users from the database", count)
+            rows = await self.database.fetch("SELECT data FROM discord_users")
+            for rec in rows:
+                self.store_user(rec['data'], cache=False)
+            logging.info("Loaded %d users", len(rows))
         except Exception as e:
-            logging.exception("Failed to load users from database: %s", e)
+            logging.exception("Failed to load users: %s", e)
 
     async def load_members_from_db(self) -> None:
-        if not self.database:
+        """
+        Stream all members, reload embedded users and rehydrate Member objects.
+        """
+        if not getattr(self, 'database', None):
             return
-    
+
         try:
-            # Batch load all members
-            members = await self.database.fetch(
-                "SELECT guild_id, data FROM discord_members"
-            )
-    
-            for record in members:
-                guild_id = record["guild_id"]
-                member_data = record["data"]
-                
-                guild = self._get_or_create_unavailable_guild(guild_id)
-                if "user" in member_data:
-                    self.store_user(member_data["user"], cache=False)
-                
-                member = Member(guild=guild, data=member_data, state=self)
+            rows = await self.database.fetch("SELECT guild_id, data FROM discord_members")
+            for row in rows:
+                gid = row['guild_id']
+                mdata = row['data']
+                if u := mdata.get('user'):
+                    self.store_user(u, cache=False)
+                guild = self._get_or_create_unavailable_guild(gid)
+                member = Member(guild=guild, data=mdata, state=self)
                 if self.member_cache_flags.joined:
                     guild._add_member(member)
-    
-            logging.info("Loaded %d members", len(members))
+            logging.info("Loaded %d members", len(rows))
         except Exception as e:
-            logging.exception("Member load failed: %s", e)
-        
+            logging.exception("Failed to load members: %s", e)
 
     def clear(self, *, views: bool = True) -> None:
         self._chunk_requests.clear()
