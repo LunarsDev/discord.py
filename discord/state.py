@@ -432,30 +432,42 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
 
         logging.info("Loading members from the database")
         try:
-            # Changed query to target id=1
-            result = await self.database.fetch("SELECT members FROM dpy_cache WHERE id = 1")
-            total = 0
-            for row in result:
-                members_json = row.get("members")
-                if not members_json:
-                    continue
+            # Use fetchrow instead of fetch
+            row = await self.database.fetchrow("SELECT members FROM dpy_cache WHERE id = 1")
+            if not row:
+                logging.info("No members cache found")
+                return
 
-                for guild_id_str, guild_members in members_json.items():
-                    try:
-                        guild_id = int(guild_id_str)
-                        guild = self._get_or_create_unavailable_guild(guild_id)
-                        self._add_guild(guild)
-                        # Iterate over members in this guild
-                        for user_id_str, member_data in guild_members.items():
+            members_json = row.get("members")
+            if not members_json:
+                logging.info("No members in cache")
+                return
+
+            total = 0
+            for guild_id_str, guild_members in members_json.items():
+                try:
+                    guild_id = int(guild_id_str)
+                    guild = self._get_or_create_unavailable_guild(guild_id)
+                    self._add_guild(guild)
+                    
+                    for user_id_str, member_data in guild_members.items():
+                        try:
+                            # Ensure user is cached first
+                            if "user" in member_data:
+                                self.store_user(member_data["user"], cache=False)
+                            
                             member = Member(guild=guild, data=member_data, state=self)
                             if self.member_cache_flags.joined:
                                 guild._add_member(member)
                             total += 1
-                    except Exception as e:
-                        logging.exception("Failed to load members for guild %s: %s", guild_id_str, e)
-            logging.info("Loaded %d members from the database.", total)
+                        except Exception as e:
+                            logging.exception("Failed to load member %s in guild %s: %s", user_id_str, guild_id_str, e)
+                except Exception as e:
+                    logging.exception("Failed to process guild %s: %s", guild_id_str, e)
+            
+            logging.info("Loaded %d members from the database", total)
         except Exception as e:
-            logging.exception("Failed to load members from database: %s", e)
+            logging.exception("Failed to load members: %s", e)
 
     def clear(self, *, views: bool = True) -> None:
         self._chunk_requests.clear()
