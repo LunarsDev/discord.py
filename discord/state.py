@@ -297,6 +297,7 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         # Purposefully don't call `clear` because users rely on cache being available post-close
 
     async def user_to_db(self, user: UserPayload) -> None:
+        import orjson  # if not already imported
         if not self.database:
             logging.warning("Database not available, skipping user storage")
             return
@@ -306,21 +307,25 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
             logging.warning("User payload missing 'id', skipping: %s", user)
             return
     
+        # Convert user to JSON string for PostgreSQL
+        user_json = orjson.dumps(user).decode("utf-8")
+    
         logging.debug("Storing user %s in the database", user_id)
         try:
             await self.database.execute(
                 """
                 UPDATE dpy_cache
-                SET users = COALESCE(users, '{}'::jsonb) || jsonb_build_object($1, $2::jsonb)
+                SET users = COALESCE(users, '{}'::jsonb) || jsonb_build_object($1::text, $2::jsonb)
                 WHERE id = 1
                 """,
                 user_id,
-                user,
+                user_json,
             )
         except Exception as e:
             logging.exception("Failed to store user %s in database: %s", user_id, e)
-
+    
     async def member_to_db(self, guild_id: int, member: gw.MemberWithUser) -> None:
+        import orjson  # if not already imported
         if not self.database:
             logging.warning("Database connection not available, skipping member storage")
             return
@@ -332,18 +337,21 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
             logging.warning("Member payload missing user id, skipping: %s", member)
             return
     
+        # Convert member to JSON string for PostgreSQL
+        member_json = orjson.dumps(member).decode("utf-8")
+    
         logging.debug("Storing member %s in guild %s in the database", user_id, guild_id_str)
         try:
             await self.database.execute(
                 """
                 UPDATE dpy_cache
                 SET members = COALESCE(members, '{}'::jsonb) ||
-                    jsonb_build_object($1, COALESCE(members->$1, '{}'::jsonb) || jsonb_build_object($2, $3::jsonb))
+                    jsonb_build_object($1::text, COALESCE(members->$1::text, '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb))
                 WHERE id = 1
                 """,
                 guild_id_str,
                 user_id,
-                member,
+                member_json,
             )
         except Exception as e:
             logging.exception("Failed to store member %s in guild %s: %s", user_id, guild_id_str, e)
