@@ -343,6 +343,7 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
                 guild_id,
                 user_id,
                 json.dumps(member)
+            )
         except Exception as e:
             logging.error("Failed to store member %s: %s", user_id, e)
     
