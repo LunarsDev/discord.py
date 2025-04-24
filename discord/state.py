@@ -427,7 +427,7 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
                     data["id"] = str(rec["user_id"])
 
                 # Hand off to store_user (which will int(data['id']) internally)
-                self.store_user(data, cache=False)
+                self.store_user(data)
                 loaded += 1
 
             logging.info("Loaded %d users", loaded)
@@ -448,7 +448,7 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
                 gid = row['guild_id']
                 mdata = row['data']
                 if u := mdata.get('user'):
-                    self.store_user(u, cache=False)
+                    self.store_user(u)
                 guild = self._get_or_create_unavailable_guild(gid)
                 member = Member(guild=guild, data=mdata, state=self)
                 if self.member_cache_flags.joined:
