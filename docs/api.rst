@@ -3871,6 +3871,27 @@ of :class:`enum.Enum`.
 
         An alias for :attr:`.default`.
 
+
+.. class:: MediaItemLoadingState
+
+    Represents a :class:`UnfurledMediaItem` load state.
+
+    .. attribute:: unknown
+
+        Unknown load state.
+
+    .. attribute:: loading
+
+        The media item is still loading.
+
+    .. attribute:: loaded
+
+        The media item is loaded.
+
+    .. attribute:: not_found
+
+        The media item was not found.
+
 .. _discord-api-audit-logs:
 
 Audit Log Data
@@ -5435,8 +5456,6 @@ PollAnswer
 .. autoclass:: PollAnswer()
     :members:
 
-.. _discord_api_data:
-
 MessageSnapshot
 ~~~~~~~~~~~~~~~~~
 
@@ -5452,6 +5471,16 @@ ClientStatus
 
 .. autoclass:: ClientStatus()
     :members:
+
+CallMessage
+~~~~~~~~~~~~~~~~~~~
+
+.. attributetable:: CallMessage
+
+.. autoclass:: CallMessage()
+    :members:
+
+.. _discord_api_data:
 
 Data Classes
 --------------
@@ -5756,12 +5785,21 @@ PollMedia
 .. autoclass:: PollMedia
     :members:
 
-CallMessage
-~~~~~~~~~~~~~~~~~~~
+UnfurledMediaItem
+~~~~~~~~~~~~~~~~~
 
-.. attributetable:: CallMessage
+.. attributetable:: UnfurledMediaItem
 
-.. autoclass:: CallMessage()
+.. autoclass:: UnfurledMediaItem
+    :members:
+
+
+MediaGalleryItem
+~~~~~~~~~~~~~~~~
+
+.. attributetable:: MediaGalleryItem
+
+.. autoclass:: MediaGalleryItem
     :members:
 
 
