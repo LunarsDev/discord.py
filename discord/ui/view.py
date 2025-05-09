@@ -337,7 +337,7 @@ class BaseView:
         TypeError
             An :class:`Item` was not passed.
         ValueError
-            Maximum number of children has been exceeded (25), the
+            Maximum number of children has been exceeded, the
             row the item is trying to be added to is full or the item
             you tried to add is not allowed in this View.
         """
@@ -756,6 +756,8 @@ class LayoutView(BaseView):
         If ``None`` then there is no timeout.
     """
 
+    __discord_ui_layout_view__: ClassVar[bool] = True
+
     def __init__(self, *, timeout: Optional[float] = 180.0) -> None:
         super().__init__(timeout=timeout)
         self.__total_children: int = len(list(self.walk_children()))
@@ -764,6 +766,8 @@ class LayoutView(BaseView):
             raise ValueError('maximum number of children exceeded')
 
     def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+
         children: Dict[str, ItemLike] = {}
         callback_children: Dict[str, ItemCallbackType[Any]] = {}
 
@@ -789,7 +793,8 @@ class LayoutView(BaseView):
 
         # sorted by row, which in LayoutView indicates the position of the component in the
         # payload instead of in which ActionRow it should be placed on.
-        for child in sorted(self._children, key=lambda i: i._rendered_row or 0):
+        key = lambda i: i._rendered_row or i._row or sys.maxsize
+        for child in sorted(self._children, key=key):
             components.append(
                 child.to_component_dict(),
             )
@@ -798,7 +803,7 @@ class LayoutView(BaseView):
 
     def add_item(self, item: Item[Any]) -> Self:
         if self.__total_children >= 40:
-            raise ValueError('maximum number of children exceeded')
+            raise ValueError('maximum number of children exceeded (40)')
         super().add_item(item)
         return self
 

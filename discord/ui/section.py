@@ -23,6 +23,7 @@ DEALINGS IN THE SOFTWARE.
 """
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Any, Dict, Generator, List, Literal, Optional, TypeVar, Union, ClassVar
 
 from .item import Item
@@ -115,6 +116,9 @@ class Section(Item[V]):
     def is_dispatchable(self) -> bool:
         return self.accessory.is_dispatchable()
 
+    def is_persistent(self) -> bool:
+        return self.is_dispatchable() and self.accessory.is_persistent()
+
     def walk_children(self) -> Generator[Item[V], None, None]:
         """An iterator that recursively walks through all the children of this section.
         and it's children, if applicable.
@@ -162,6 +166,10 @@ class Section(Item[V]):
         item._view = self.view
         item._parent = self
         self._children.append(item)
+
+        if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
+            self._view.__total_children += 1
+
         return self
 
     def remove_item(self, item: Item[Any]) -> Self:
@@ -180,6 +188,10 @@ class Section(Item[V]):
             self._children.remove(item)
         except ValueError:
             pass
+        else:
+            if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
+                self._view.__total_children -= 1
+
         return self
 
     def get_item_by_id(self, id: int, /) -> Optional[Item[V]]:
@@ -208,6 +220,9 @@ class Section(Item[V]):
         This function returns the class instance to allow for fluent-style
         chaining.
         """
+        if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
+            self._view.__total_children -= len(self._children) + 1  # the + 1 is the accessory
+
         self._children.clear()
         return self
 
@@ -228,7 +243,7 @@ class Section(Item[V]):
                 c.to_component_dict()
                 for c in sorted(
                     self._children,
-                    key=lambda i: i._rendered_row or 0,
+                    key=lambda i: i._rendered_row or sys.maxsize,
                 )
             ],
             'accessory': self.accessory.to_component_dict(),

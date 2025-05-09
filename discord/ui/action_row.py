@@ -23,6 +23,7 @@ DEALINGS IN THE SOFTWARE.
 """
 from __future__ import annotations
 
+import sys
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -202,6 +203,9 @@ class ActionRow(Item[V]):
     def is_dispatchable(self) -> bool:
         return any(c.is_dispatchable() for c in self.children)
 
+    def is_persistent(self) -> bool:
+        return self.is_dispatchable() and all(c.is_persistent() for c in self.children)
+
     def _update_children_view(self, view: LayoutView) -> None:
         for child in self._children:
             child._view = view  # pyright: ignore[reportAttributeAccessIssue]
@@ -268,6 +272,10 @@ class ActionRow(Item[V]):
         item._view = self._view
         item._parent = self
         self._children.append(item)
+
+        if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
+            self._view.__total_children += 1
+
         return self
 
     def remove_item(self, item: Item[Any]) -> Self:
@@ -286,6 +294,10 @@ class ActionRow(Item[V]):
             self._children.remove(item)
         except ValueError:
             pass
+        else:
+            if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
+                self._view.__total_children -= 1
+
         return self
 
     def get_item_by_id(self, id: int, /) -> Optional[Item[V]]:
@@ -314,14 +326,17 @@ class ActionRow(Item[V]):
         This function returns the class instance to allow for fluent-style
         chaining.
         """
+        if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
+            self._view.__total_children -= len(self._children)
         self._children.clear()
         return self
 
     def to_component_dict(self) -> Dict[str, Any]:
         components = []
 
-        for item in self._children:
-            components.append(item.to_component_dict())
+        key = lambda i: i._rendered_row or i._row or sys.maxsize
+        for child in sorted(self._children, key=key):
+            components.append(child.to_component_dict())
 
         base = {
             'type': self.type.value,
