@@ -297,6 +297,17 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
 
         # Purposefully don't call `clear` because users rely on cache being available post-close
 
+    @property
+    def cluster_id(self) -> int | None:
+        found = os.environ.get('CLUSTER_ID', None)
+        if found is None:
+            found = getattr(self._get_client(), 'cluster_id', None)
+
+        if found is None:
+            logging.warning("Cannot get cluster_id from client")
+            return None
+
+        return int(found)
 
     async def user_to_db(self, user: Dict[str, Any]) -> None:
         """
@@ -311,16 +322,21 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
             logging.warning("User missing ID: %s", user)
             return
 
+        cluster_id = self.cluster_id
+        if cluster_id is None:
+            return
+        
         try:
             await self.database.execute(
                 """
-                INSERT INTO discord_users (user_id, data)
-                VALUES ($1, $2)
+                INSERT INTO discord_users (user_id, data, cluster_id)
+                VALUES ($1, $2, $3)
                 ON CONFLICT (user_id) DO UPDATE
-                  SET data = EXCLUDED.data
+                  SET data = EXCLUDED.data, cluster_id = EXCLUDED.cluster_id
                 """,
                 int(uid),
-                user  # auto-converted to JSONB
+                user,  # auto-converted to JSONB
+                cluster_id
             )
         except Exception as e:
             logging.error("Failed to store user %s: %s", uid, e)
@@ -337,24 +353,29 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
             logging.warning("Invalid member payload: %s", member)
             return
 
+        cluster_id = self.cluster_id
+        if cluster_id is None:
+            return
+
         uid = int(user['id'])
         try:
             await self.database.execute(
                 """
                 WITH upsert_user AS (
-                  INSERT INTO discord_users (user_id, data)
-                  VALUES ($1, $3)
+                  INSERT INTO discord_users (user_id, data, cluster_id)
+                  VALUES ($1, $3, $4)
                   ON CONFLICT (user_id) DO UPDATE
-                    SET data = EXCLUDED.data
+                    SET data = EXCLUDED.data, cluster_id = EXCLUDED.cluster_id
                 )
-                INSERT INTO discord_members (guild_id, user_id, data)
-                VALUES ($2, $1, $3)
+                INSERT INTO discord_members (guild_id, user_id, data, cluster_id)
+                VALUES ($2, $1, $3, $4)
                 ON CONFLICT (guild_id, user_id) DO UPDATE
-                  SET data = EXCLUDED.data
+                  SET data = EXCLUDED.data, cluster_id = EXCLUDED.cluster_id
                 """,
                 uid,
                 guild_id,
-                member
+                member,
+                cluster_id
             )
         except Exception as e:
             logging.error("Failed to store member %s in guild %s: %s", uid, guild_id, e)
@@ -367,10 +388,15 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
             logging.warning("DB unavailable, skipping user removal")
             return
 
+        cluster_id = self.cluster_id
+        if cluster_id is None:
+            return
+
         try:
             await self.database.execute(
-                "DELETE FROM discord_users WHERE user_id = $1",
-                user_id
+                "DELETE FROM discord_users WHERE user_id = $1 AND cluster_id = $2",
+                user_id,
+                cluster_id
             )
         except Exception as e:
             logging.exception("Failed to remove user %s: %s", user_id, e)
@@ -382,11 +408,16 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         if not getattr(self, 'database', None):
             return
 
+        cluster_id = self.cluster_id
+        if cluster_id is None:
+            return
+
         try:
             await self.database.execute(
-                "DELETE FROM discord_members WHERE guild_id = $1 AND user_id = $2",
+                "DELETE FROM discord_members WHERE guild_id = $1 AND user_id = $2 AND cluster_id = $3",
                 guild_id,
-                user_id
+                user_id,
+                cluster_id
             )
         except Exception as e:
             logging.error("Failed to remove member %s from guild %s: %s", user_id, guild_id, e)
@@ -401,10 +432,15 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         if not getattr(self, "database", None):
             logging.warning("DB unavailable, skipping load users")
             return
+        
+        cluster_id = self.cluster_id
+        if cluster_id is None:
+            return
 
         try:
             rows = await self.database.fetch(
-                "SELECT user_id, data FROM discord_users"
+                "SELECT user_id, data FROM discord_users WHERE cluster_id = $1",
+                cluster_id
             )
             loaded = 0
 
@@ -442,8 +478,15 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         if not getattr(self, 'database', None):
             return
 
+        cluster_id = self.cluster_id
+        if cluster_id is None:
+            return
+
         try:
-            rows = await self.database.fetch("SELECT guild_id, data FROM discord_members")
+            rows = await self.database.fetch(
+                "SELECT guild_id, data FROM discord_members WHERE cluster_id = $1",
+                cluster_id
+            )
             for row in rows:
                 gid = row['guild_id']
                 mdata = row['data']
