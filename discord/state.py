@@ -276,6 +276,22 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
                 parsers[attr[6:].upper()] = func
 
         self.clear()
+        self._member_batch: List[Dict[str, Any]] = []
+        self._member_batch_lock = asyncio.Lock()
+        self._batch_size = 250
+        self._batch_flush_interval = 3600  # 1 hour between auto flushes
+        self._flush_task = self.loop.create_task(self._periodic_flush())
+
+    async def _periodic_flush(self) -> None:
+        """Periodically flush member batches to the database."""
+        try:
+            while True:
+                await asyncio.sleep(self._batch_flush_interval)
+                await self._flush_member_batch()
+        except asyncio.CancelledError:
+            # Flush remaining members if needed before exit.
+            await self._flush_member_batch()
+
 
     # For some reason Discord still sends emoji/sticker data in payloads
     # This makes it hard to actually swap out the appropriate store methods
@@ -290,6 +306,14 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
                 await voice.disconnect(force=True)
             except Exception:
                 # if an error happens during disconnects, disregard it.
+                pass
+        if hasattr(self, "_flush_task"):
+            self._flush_task.cancel()
+            try:
+                await self._flush_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
                 pass
 
         if self._translator:
@@ -308,6 +332,80 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
             return None
 
         return int(found)
+
+    async def _flush_member_batch(self) -> None:
+        """
+        Flush the queued member upserts in one batched query.
+        """
+        async with self._member_batch_lock:
+            if not self._member_batch:
+                return
+            # Extract the batch and reset the container.
+            batch = self._member_batch
+            self._member_batch = []
+
+        # Prepare arrays for our batched upsert.
+        user_ids: List[int] = []
+        members_data: List[Any] = []  # Adjust type if needed (e.g. to JSON/dict)
+        cluster_ids: List[int] = []
+        guild_ids: List[int] = []
+
+        for item in batch:
+            member = item["member"]
+            guild_id = item["guild_id"]
+            user = member.get("user")
+            if not user or "id" not in user:
+                logging.warning("Invalid member payload during batch flush: %s", member)
+                continue
+            try:
+                uid = int(user["id"])
+            except (ValueError, TypeError):
+                logging.warning("Invalid user id in payload: %s", user)
+                continue
+
+            user_ids.append(uid)
+            members_data.append(member)
+            cluster_ids.append(self.cluster_id)
+            guild_ids.append(guild_id)
+
+        # If after filtering there is nothing to flush, return.
+        if not user_ids:
+            return
+
+        query = """
+        WITH upsert_user AS (
+          INSERT INTO discord_users (user_id, data, cluster_id)
+          SELECT uid, data, cluster_id FROM (
+            SELECT unnest($1::bigint[]) AS uid,
+                   unnest($2::jsonb[]) AS data,
+                   unnest($3::int[]) AS cluster_id
+          ) AS vals
+          ON CONFLICT (user_id) DO UPDATE
+            SET data = EXCLUDED.data,
+                cluster_id = EXCLUDED.cluster_id
+        )
+        INSERT INTO discord_members (guild_id, user_id, data, cluster_id)
+        SELECT guild_id, uid, data, cluster_id FROM (
+          SELECT unnest($4::int[]) AS guild_id,
+                 unnest($1::bigint[]) AS uid,
+                 unnest($2::jsonb[]) AS data,
+                 unnest($3::int[]) AS cluster_id
+          ) AS vals
+        ON CONFLICT (guild_id, user_id) DO UPDATE
+          SET data = EXCLUDED.data,
+              cluster_id = EXCLUDED.cluster_id;
+        """
+        try:
+            await self.database.execute(
+                query,
+                user_ids,
+                members_data,
+                cluster_ids,
+                guild_ids,
+            )
+        except Exception as e:
+            logging.error("Failed to store %d member(s): %s", len(user_ids), e)
+
 
     async def user_to_db(self, user: Dict[str, Any]) -> None:
         """
@@ -343,42 +441,27 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
 
     async def member_to_db(self, guild_id: int, member: Dict[str, Any]) -> None:
         """
-        Upsert both user and member in one CTE to halve round trips.
+        Queue a member upsert to later batch-process both user and member data.
         """
-        if not getattr(self, 'database', None):
+        if not getattr(self, "database", None):
             return
 
-        user = member.get('user')
-        if not user or 'id' not in user:
+        # Validate member payload.
+        user = member.get("user")
+        if not user or "id" not in user:
             logging.warning("Invalid member payload: %s", member)
             return
 
-        cluster_id = self.cluster_id
-        if cluster_id is None:
+        if self.cluster_id is None:
             return
 
-        uid = int(user['id'])
-        try:
-            await self.database.execute(
-                """
-                WITH upsert_user AS (
-                  INSERT INTO discord_users (user_id, data, cluster_id)
-                  VALUES ($1, $3, $4)
-                  ON CONFLICT (user_id) DO UPDATE
-                    SET data = EXCLUDED.data, cluster_id = EXCLUDED.cluster_id
-                )
-                INSERT INTO discord_members (guild_id, user_id, data, cluster_id)
-                VALUES ($2, $1, $3, $4)
-                ON CONFLICT (guild_id, user_id) DO UPDATE
-                  SET data = EXCLUDED.data, cluster_id = EXCLUDED.cluster_id
-                """,
-                uid,
-                guild_id,
-                member,
-                cluster_id
-            )
-        except Exception as e:
-            logging.error("Failed to store member %s in guild %s: %s", uid, guild_id, e)
+        async with self._member_batch_lock:
+            # Attach guild_id to member data for use during flush.
+            # We store a tuple (guild_id, member).
+            self._member_batch.append({"guild_id": guild_id, "member": member})
+            # If the batch already reached our size threshold, flush immediately.
+            if len(self._member_batch) >= self._batch_size:
+                await self._flush_member_batch()
 
     async def remove_user_from_db(self, user_id: int) -> None:
         """
