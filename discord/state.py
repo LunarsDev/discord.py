@@ -278,7 +278,7 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         self.clear()
         self._member_batch: List[Dict[str, Any]] = []
         self._member_batch_lock = asyncio.Lock()
-        self._batch_size = 250
+        self._batch_size = 5000  # 5000 members per batch
         self._batch_flush_interval = 3600  # 1 hour between auto flushes
         self._flush_task = self.loop.create_task(self._periodic_flush())
 
