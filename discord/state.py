@@ -280,6 +280,8 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
         self._member_batch_lock = asyncio.Lock()
         self._batch_size = 5000  # 5000 members per batch
         self._batch_flush_interval = 3600  # 1 hour between auto flushes
+        print("start periodic flush")
+        asyncio.create_task(self._periodic_flush())
 
     async def _periodic_flush(self) -> None:
         """Periodically flush member batches to the database."""
@@ -2256,8 +2258,7 @@ class AutoShardedConnectionState(ConnectionState[DatabaseT, ClientT]):
         asyncio.create_task(self.load_users_from_db())
         print("load db members cache:")
         asyncio.create_task(self.load_members_from_db())
-        print("start periodic flush")
-        asyncio.create_task(self._periodic_flush())
+
         self.user: Optional[ClientUser]
         self.user = user = ClientUser(state=self, data=data['user'])
         # self._users is a list of Users, we're setting a ClientUser
