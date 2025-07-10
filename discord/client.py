@@ -2555,7 +2555,7 @@ class Client[DatabaseT]:
         )
         return Invite.from_incomplete(state=self._connection, data=data)
 
-    async def delete_invite(self, invite: Union[Invite, str], /) -> None:
+    async def delete_invite(self, invite: Union[Invite, str], /) -> Invite:
         """|coro|
 
         Revokes an :class:`.Invite`, URL, or ID to an invite.
@@ -2583,7 +2583,8 @@ class Client[DatabaseT]:
         """
 
         resolved = utils.resolve_invite(invite)
-        await self.http.delete_invite(resolved.code)
+        data = await self.http.delete_invite(resolved.code)
+        return Invite.from_incomplete(state=self._connection, data=data)
 
     # Miscellaneous stuff
 
