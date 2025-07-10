@@ -24,7 +24,6 @@ DEALINGS IN THE SOFTWARE.
 
 from __future__ import annotations
 
-import os
 from typing import Any, Callable, Coroutine, Dict, Generic, Optional, TYPE_CHECKING, Tuple, Type, TypeVar
 
 from ..interactions import Interaction
@@ -66,7 +65,7 @@ class Item(Generic[V]):
     .. versionadded:: 2.0
     """
 
-    __item_repr_attributes__: Tuple[str, ...] = ('row',)
+    __item_repr_attributes__: Tuple[str, ...] = ('row', 'id')
 
     def __init__(self):
         self._view: Optional[V] = None
@@ -82,11 +81,6 @@ class Item(Generic[V]):
         self._id: Optional[int] = None
         self._max_row: int = 5 if not self._is_v2() else 40
         self._parent: Optional[Item] = None
-
-        if self._is_v2():
-            # this is done so v2 components can be stored on ViewStore._views
-            # and does not break v1 components custom_id property
-            self.custom_id: str = os.urandom(16).hex()
 
     def to_component_dict(self) -> Dict[str, Any]:
         raise NotImplementedError
@@ -161,6 +155,13 @@ class Item(Generic[V]):
             can_run = await self._parent._run_checks(interaction)
 
         return can_run
+
+    def _can_be_dynamic(self) -> bool:
+        # if an item can be dynamic then it must override this, this is mainly used
+        # by DynamicItem's so a user cannot set, for example, a Container with a dispatchable
+        # button as a dynamic item, and cause errors where Container can't be dispatched
+        # or lost interactions
+        return False
 
     async def callback(self, interaction: Interaction[ClientT]) -> Any:
         """|coro|

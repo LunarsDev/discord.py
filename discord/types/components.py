@@ -33,8 +33,8 @@ from .channel import ChannelType
 ComponentType = Literal[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17]
 ButtonStyle = Literal[1, 2, 3, 4, 5, 6]
 TextStyle = Literal[1, 2]
-DefaultValueType = Literal["user", "role", "channel"]
-DividerSize = Literal[1, 2]
+DefaultValueType = Literal['user', 'role', 'channel']
+SeparatorSize = Literal[1, 2]
 MediaItemLoadingState = Literal[0, 1, 2, 3]
 
 
@@ -128,7 +128,7 @@ class SelectMenu(SelectComponent):
 class SectionComponent(ComponentBase):
     type: Literal[9]
     components: List[Union[TextComponent, ButtonComponent]]
-    accessory: ComponentBase
+    accessory: Component
 
 
 class TextComponent(ComponentBase):
@@ -144,6 +144,7 @@ class UnfurledMediaItem(TypedDict):
     content_type: NotRequired[str]
     placeholder: str
     loading_state: MediaItemLoadingState
+    attachment_id: NotRequired[int]
     flags: NotRequired[int]
 
 
@@ -156,7 +157,7 @@ class ThumbnailComponent(ComponentBase):
 
 class MediaGalleryItem(TypedDict):
     media: UnfurledMediaItem
-    description: NotRequired[Optional[str]]
+    description: NotRequired[str]
     spoiler: NotRequired[bool]
 
 
@@ -169,12 +170,14 @@ class FileComponent(ComponentBase):
     type: Literal[13]
     file: UnfurledMediaItem
     spoiler: NotRequired[bool]
+    name: NotRequired[str]
+    size: NotRequired[int]
 
 
 class SeparatorComponent(ComponentBase):
     type: Literal[14]
     divider: NotRequired[bool]
-    spacing: NotRequired[DividerSize]
+    spacing: NotRequired[SeparatorSize]
 
 
 class ContainerComponent(ComponentBase):

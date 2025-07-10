@@ -44,7 +44,6 @@ from typing import (
 
 from .item import Item, ItemCallbackType
 from .button import Button, button as _button
-from .dynamic import DynamicItem
 from .select import select as _select, Select, UserSelect, RoleSelect, ChannelSelect, MentionableSelect
 from ..components import ActionRow as ActionRowComponent
 from ..enums import ButtonStyle, ComponentType, ChannelType
@@ -87,10 +86,10 @@ class _ActionRowCallback:
 
 
 class ActionRow(Item[V]):
-    """Represents a UI action row.
+    r"""Represents a UI action row.
 
     This is a top-level layout component that can only be used on :class:`LayoutView`
-    and can contain :class:`Button` 's and :class:`Select` 's in it.
+    and can contain :class:`Button`\s and :class:`Select`\s in it.
 
     This can be inherited.
 
@@ -143,6 +142,10 @@ class ActionRow(Item[V]):
     __action_row_children_items__: ClassVar[List[ItemCallbackType[Any]]] = []
     __discord_ui_action_row__: ClassVar[bool] = True
     __discord_ui_update_view__: ClassVar[bool] = True
+    __item_repr_attributes__ = (
+        'row',
+        'id',
+    )
 
     def __init__(
         self,
@@ -176,6 +179,9 @@ class ActionRow(Item[V]):
 
         cls.__action_row_children_items__ = list(children.values())
 
+    def __repr__(self) -> str:
+        return f'{super().__repr__()[:-1]} children={len(self._children)}>'
+
     def _init_children(self) -> List[Item[Any]]:
         children = []
 
@@ -187,24 +193,6 @@ class ActionRow(Item[V]):
             self._weight += item.width
             children.append(item)
         return children
-
-    def _update_store_data(self, dispatch_info: Dict, dynamic_items: Dict) -> bool:
-        is_fully_dynamic = True
-
-        for item in self._children:
-            if isinstance(item, DynamicItem):
-                pattern = item.__discord_ui_compiled_template__
-                dynamic_items[pattern] = item.__class__
-            elif item.is_dispatchable():
-                dispatch_info[(item.type.value, item.custom_id)] = item
-                is_fully_dynamic = False
-        return is_fully_dynamic
-
-    def is_dispatchable(self) -> bool:
-        return any(c.is_dispatchable() for c in self.children)
-
-    def is_persistent(self) -> bool:
-        return self.is_dispatchable() and all(c.is_persistent() for c in self.children)
 
     def _update_children_view(self, view: LayoutView) -> None:
         for child in self._children:
@@ -274,7 +262,7 @@ class ActionRow(Item[V]):
         self._children.append(item)
 
         if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
-            self._view.__total_children += 1
+            self._view._total_children += 1
 
         return self
 
@@ -296,11 +284,11 @@ class ActionRow(Item[V]):
             pass
         else:
             if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
-                self._view.__total_children -= 1
+                self._view._total_children -= 1
 
         return self
 
-    def get_item_by_id(self, id: int, /) -> Optional[Item[V]]:
+    def get_item(self, id: int, /) -> Optional[Item[V]]:
         """Gets an item with :attr:`Item.id` set as ``id``, or ``None`` if
         not found.
 
@@ -318,7 +306,7 @@ class ActionRow(Item[V]):
         Optional[:class:`Item`]
             The item found, or ``None``.
         """
-        return _utils_get(self._children, id=id)
+        return _utils_get(self.walk_children(), id=id)
 
     def clear_items(self) -> Self:
         """Removes all items from the row.
@@ -327,16 +315,22 @@ class ActionRow(Item[V]):
         chaining.
         """
         if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
-            self._view.__total_children -= len(self._children)
+            self._view._total_children -= len(self._children)
         self._children.clear()
         return self
 
     def to_component_dict(self) -> Dict[str, Any]:
         components = []
 
-        key = lambda i: i._rendered_row or i._row or sys.maxsize
-        for child in sorted(self._children, key=key):
-            components.append(child.to_component_dict())
+        def key(item: Item) -> int:
+            if item._rendered_row is not None:
+                return item._rendered_row
+            if item._row is not None:
+                return item._row
+            return sys.maxsize
+
+        for component in sorted(self.children, key=key):
+            components.append(component.to_component_dict())
 
         base = {
             'type': self.type.value,
@@ -583,7 +577,7 @@ class ActionRow(Item[V]):
     def from_component(cls, component: ActionRowComponent) -> ActionRow:
         from .view import _component_to_item
 
-        self = cls()
+        self = cls(id=component.id)
         for cmp in component.children:
-            self.add_item(_component_to_item(cmp))
+            self.add_item(_component_to_item(cmp, self))
         return self

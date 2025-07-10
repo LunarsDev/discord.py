@@ -43,7 +43,6 @@ if TYPE_CHECKING:
     from typing_extensions import Self
 
     from .view import BaseView
-    from .action_row import ActionRow
     from ..emoji import Emoji
     from ..types.components import ButtonComponent as ButtonComponentPayload
 
@@ -97,6 +96,7 @@ class Button(Item[V]):
         'emoji',
         'row',
         'sku_id',
+        'id',
     )
 
     def __init__(
@@ -151,7 +151,6 @@ class Button(Item[V]):
             sku_id=sku_id,
             id=id,
         )
-        self._parent: Optional[ActionRow] = None
         self.row = row
         self.id = id
 
@@ -268,6 +267,9 @@ class Button(Item[V]):
         if self.style is ButtonStyle.link:
             return self.url is not None
         return super().is_persistent()
+
+    def _can_be_dynamic(self) -> bool:
+        return True
 
     def _refresh_component(self, button: ButtonComponent) -> None:
         self._underlying = button

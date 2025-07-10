@@ -36,22 +36,19 @@ from typing import (
     List,
     Literal,
     Optional,
-    Tuple,
-    Type,
     TypeVar,
     Union,
 )
 
 from .item import Item, ItemCallbackType
 from .view import _component_to_item, LayoutView
-from .dynamic import DynamicItem
 from ..enums import ComponentType
 from ..utils import MISSING, get as _utils_get
+from ..colour import Colour, Color
 
 if TYPE_CHECKING:
     from typing_extensions import Self
 
-    from ..colour import Colour, Color
     from ..components import Container as ContainerComponent
     from ..interactions import Interaction
 
@@ -73,17 +70,14 @@ class _ContainerCallback:
 
 
 class Container(Item[V]):
-    """Represents a UI container.
+    r"""Represents a UI container.
 
     This is a top-level layout component that can only be used on :class:`LayoutView`
-    and can contain :class:`ActionRow` 's, :class:`TextDisplay` 's, :class:`Section` 's,
-    :class:`MediaGallery` 's, and :class:`File` 's in it.
+    and can contain :class:`ActionRow`\s, :class:`TextDisplay`\s, :class:`Section`\s,
+    :class:`MediaGallery`\s, and :class:`File`\s in it.
 
     This can be inherited.
 
-    .. note::
-
-        Containers can contain up to 10 top-level components.
 
     .. versionadded:: 2.6
 
@@ -106,13 +100,13 @@ class Container(Item[V]):
 
         # or use it directly on LayoutView
         class MyView(ui.LayoutView):
-            container = ui.Container([ui.TextDisplay('I am a text display on a container!')])
+            container = ui.Container(ui.TextDisplay('I am a text display on a container!'))
             # or you can use your subclass:
             # container = MyContainer()
 
     Parameters
     ----------
-    *children: List[:class:`Item`]
+    *children: :class:`Item`
         The initial children of this container.
     accent_colour: Optional[Union[:class:`.Colour`, :class:`int`]]
         The colour of the container. Defaults to ``None``.
@@ -135,6 +129,12 @@ class Container(Item[V]):
     __container_children_items__: ClassVar[Dict[str, Union[ItemCallbackType[Any], Item[Any]]]] = {}
     __discord_ui_update_view__: ClassVar[bool] = True
     __discord_ui_container__: ClassVar[bool] = True
+    __item_repr_attributes__ = (
+        'accent_colour',
+        'spoiler',
+        'row',
+        'id',
+    )
 
     def __init__(
         self,
@@ -146,7 +146,6 @@ class Container(Item[V]):
         id: Optional[int] = None,
     ) -> None:
         super().__init__()
-        self.__dispatchable: List[Item[V]] = []
         self._children: List[Item[V]] = self._init_children()
 
         if children is not MISSING:
@@ -154,10 +153,13 @@ class Container(Item[V]):
                 self.add_item(child)
 
         self.spoiler: bool = spoiler
-        self._colour = accent_colour or accent_color
+        self._colour = accent_colour if accent_colour is not None else accent_color
 
         self.row = row
         self.id = id
+
+    def __repr__(self) -> str:
+        return f'<{super().__repr__()[:-1]} children={len(self._children)}>'
 
     def _init_children(self) -> List[Item[Any]]:
         children = []
@@ -165,25 +167,14 @@ class Container(Item[V]):
 
         for name, raw in self.__container_children_items__.items():
             if isinstance(raw, Item):
-                if getattr(raw, '__discord_ui_action_row__', False):
-                    item = copy.deepcopy(raw)
-                    # we need to deepcopy this object and set it later to prevent
-                    # errors reported on the bikeshedding post
-                    item._parent = self
-
+                item = copy.deepcopy(raw)
+                item._parent = self
+                if getattr(item, '__discord_ui_action_row__', False) and item.is_dispatchable():
                     if item.is_dispatchable():
                         self.__dispatchable.extend(item._children)  # type: ignore
-                if getattr(raw, '__discord_ui_section__', False):
-                    item = copy.copy(raw)
-                    if item.accessory.is_dispatchable():  # type: ignore
-                        item.accessory = copy.deepcopy(item.accessory)  # type: ignore
-                        if item.accessory._provided_custom_id is False:  # type: ignore
-                            item.accessory.custom_id = os.urandom(16).hex()  # type: ignore
-                else:
-                    item = copy.copy(raw)
-
                 if getattr(item, '__discord_ui_section__', False) and item.accessory.is_dispatchable():  # type: ignore
-                    self.__dispatchable.append(item.accessory)  # type: ignore
+                    if item.accessory._provided_custom_id is False:  # type: ignore
+                        item.accessory.custom_id = os.urandom(16).hex()  # type: ignore
 
                 setattr(self, name, item)
                 children.append(item)
@@ -204,15 +195,8 @@ class Container(Item[V]):
                 parents.get(parent, parent)._children.append(item)
                 # we donnot append it to the children list because technically these buttons and
                 # selects are not from the container but the action row itself.
-                self.__dispatchable.append(item)
 
         return children
-
-    def is_dispatchable(self) -> bool:
-        return bool(self.__dispatchable)
-
-    def is_persistent(self) -> bool:
-        return self.is_dispatchable() and all(c.is_persistent() for c in self.children)
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
@@ -250,6 +234,9 @@ class Container(Item[V]):
 
     @accent_colour.setter
     def accent_colour(self, value: Optional[Union[Colour, int]]) -> None:
+        if value is not None and not isinstance(value, (int, Colour)):
+            raise TypeError(f'expected an int, or Colour, not {value.__class__.__name__!r}')
+
         self._colour = value
 
     accent_color = accent_colour
@@ -268,9 +255,15 @@ class Container(Item[V]):
     def to_components(self) -> List[Dict[str, Any]]:
         components = []
 
-        key = lambda i: i._rendered_row or i._row or sys.maxsize
-        for child in sorted(self._children, key=key):
-            components.append(child.to_component_dict())
+        def key(item: Item) -> int:
+            if item._rendered_row is not None:
+                return item._rendered_row
+            if item._row is not None:
+                return item._row
+            return sys.maxsize
+
+        for i in sorted(self._children, key=key):
+            components.append(i.to_component_dict())
         return components
 
     def to_component_dict(self) -> Dict[str, Any]:
@@ -290,29 +283,15 @@ class Container(Item[V]):
             base['id'] = self.id
         return base
 
-    def _update_store_data(
-        self,
-        dispatch_info: Dict[Tuple[int, str], Item[Any]],
-        dynamic_items: Dict[Any, Type[DynamicItem]],
-    ) -> bool:
-        is_fully_dynamic = True
-        for item in self.__dispatchable:
-            if isinstance(item, DynamicItem):
-                pattern = item.__discord_ui_compiled_template__
-                dynamic_items[pattern] = item.__class__
-            elif item.is_dispatchable():
-                dispatch_info[(item.type.value, item.custom_id)] = item
-                is_fully_dynamic = False
-        return is_fully_dynamic
-
     @classmethod
     def from_component(cls, component: ContainerComponent) -> Self:
-        return cls(
-            *[_component_to_item(c) for c in component.children],
+        self = cls(
             accent_colour=component.accent_colour,
             spoiler=component.spoiler,
             id=component.id,
         )
+        self._children = [_component_to_item(cmp, self) for cmp in component.children]
+        return self
 
     def walk_children(self) -> Generator[Item[V], None, None]:
         """An iterator that recursively walks through all the children of this container
@@ -351,25 +330,15 @@ class Container(Item[V]):
             raise TypeError(f'expected Item not {item.__class__.__name__}')
 
         self._children.append(item)
-
-        if item.is_dispatchable():
-            if getattr(item, '__discord_ui_section__', False):
-                self.__dispatchable.append(item.accessory)  # type: ignore
-            elif hasattr(item, '_children'):
-                self.__dispatchable.extend([i for i in item._children if i.is_dispatchable()])  # type: ignore
-            else:
-                self.__dispatchable.append(item)
-
         is_layout_view = self._view and getattr(self._view, '__discord_ui_layout_view__', False)
 
         if getattr(item, '__discord_ui_update_view__', False):
             item._update_children_view(self.view)  # type: ignore
 
             if is_layout_view:
-                self._view.__total_children += len(tuple(item.walk_children()))  # type: ignore
-        else:
-            if is_layout_view:
-                self._view.__total_children += 1  # type: ignore
+                self._view._total_children += sum(1 for _ in item.walk_children())  # type: ignore
+        elif is_layout_view:
+            self._view._total_children += 1  # type: ignore
 
         item._view = self.view
         item._parent = self
@@ -394,12 +363,12 @@ class Container(Item[V]):
         else:
             if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
                 if getattr(item, '__discord_ui_update_view__', False):
-                    self._view.__total_children -= len(tuple(item.walk_children()))  # type: ignore
+                    self._view._total_children -= len(tuple(item.walk_children()))  # type: ignore
                 else:
-                    self._view.__total_children -= 1
+                    self._view._total_children -= 1
         return self
 
-    def get_item_by_id(self, id: int, /) -> Optional[Item[V]]:
+    def get_item(self, id: int, /) -> Optional[Item[V]]:
         """Gets an item with :attr:`Item.id` set as ``id``, or ``None`` if
         not found.
 
@@ -417,7 +386,7 @@ class Container(Item[V]):
         Optional[:class:`Item`]
             The item found, or ``None``.
         """
-        return _utils_get(self._children, id=id)
+        return _utils_get(self.walk_children(), id=id)
 
     def clear_items(self) -> Self:
         """Removes all the items from the container.
@@ -427,6 +396,6 @@ class Container(Item[V]):
         """
 
         if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
-            self._view.__total_children -= len(tuple(self.walk_children()))
+            self._view._total_children -= sum(1 for _ in self.walk_children())
         self._children.clear()
         return self

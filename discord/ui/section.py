@@ -66,6 +66,11 @@ class Section(Item[V]):
         The ID of this component. This must be unique across the view.
     """
 
+    __item_repr_attributes__ = (
+        'accessory',
+        'row',
+        'id',
+    )
     __discord_ui_section__: ClassVar[bool] = True
     __discord_ui_update_view__: ClassVar[bool] = True
 
@@ -93,6 +98,9 @@ class Section(Item[V]):
         self.row = row
         self.id = id
 
+    def __repr__(self) -> str:
+        return f'<{super().__repr__()[:-1]} children={len(self._children)}'
+
     @property
     def type(self) -> Literal[ComponentType.section]:
         return ComponentType.section
@@ -108,16 +116,6 @@ class Section(Item[V]):
 
     def _is_v2(self) -> bool:
         return True
-
-    # Accessory can be a button, and thus it can have a callback so, maybe
-    # allow for section to be dispatchable and make the callback func
-    # be accessory component callback, only called if accessory is
-    # dispatchable?
-    def is_dispatchable(self) -> bool:
-        return self.accessory.is_dispatchable()
-
-    def is_persistent(self) -> bool:
-        return self.is_dispatchable() and self.accessory.is_persistent()
 
     def walk_children(self) -> Generator[Item[V], None, None]:
         """An iterator that recursively walks through all the children of this section.
@@ -168,7 +166,7 @@ class Section(Item[V]):
         self._children.append(item)
 
         if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
-            self._view.__total_children += 1
+            self._view._total_children += 1
 
         return self
 
@@ -190,11 +188,11 @@ class Section(Item[V]):
             pass
         else:
             if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
-                self._view.__total_children -= 1
+                self._view._total_children -= 1
 
         return self
 
-    def get_item_by_id(self, id: int, /) -> Optional[Item[V]]:
+    def get_item(self, id: int, /) -> Optional[Item[V]]:
         """Gets an item with :attr:`Item.id` set as ``id``, or ``None`` if
         not found.
 
@@ -212,7 +210,7 @@ class Section(Item[V]):
         Optional[:class:`Item`]
             The item found, or ``None``.
         """
-        return _utils_get(self._children, id=id)
+        return _utils_get(self.walk_children(), id=id)
 
     def clear_items(self) -> Self:
         """Removes all the items from the section.
@@ -221,31 +219,41 @@ class Section(Item[V]):
         chaining.
         """
         if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
-            self._view.__total_children -= len(self._children) + 1  # the + 1 is the accessory
+            self._view._total_children -= len(self._children)  # we don't count the accessory because it is required
 
         self._children.clear()
         return self
 
     @classmethod
     def from_component(cls, component: SectionComponent) -> Self:
-        from .view import _component_to_item  # >circular import<
+        from .view import _component_to_item
 
-        return cls(
-            *[_component_to_item(c) for c in component.components],
-            accessory=_component_to_item(component.accessory),
-            id=component.id,
-        )
+        # using MISSING as accessory so we can create the new one with the parent set
+        self = cls(id=component.id, accessory=MISSING)
+        self.accessory = _component_to_item(component.accessory, self)
+        self.id = component.id
+        self._children = [_component_to_item(c, self) for c in component.components]
+
+        return self
+
+    def to_components(self) -> List[Dict[str, Any]]:
+        components = []
+
+        def key(item: Item) -> int:
+            if item._rendered_row is not None:
+                return item._rendered_row
+            if item._row is not None:
+                return item._row
+            return sys.maxsize
+
+        for component in sorted(self._children, key=key):
+            components.append(component.to_component_dict())
+        return components
 
     def to_component_dict(self) -> Dict[str, Any]:
         data = {
             'type': self.type.value,
-            'components': [
-                c.to_component_dict()
-                for c in sorted(
-                    self._children,
-                    key=lambda i: i._rendered_row or sys.maxsize,
-                )
-            ],
+            'components': self.to_components(),
             'accessory': self.accessory.to_component_dict(),
         }
         if self.id is not None:

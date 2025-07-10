@@ -1921,7 +1921,7 @@ class Webhook(BaseWebhook):
         if wait:
             msg = self._create_message(data, thread=thread)
 
-        if view is not MISSING and not view.is_finished():
+        if view is not MISSING and not view.is_finished() and view.is_dispatchable():
             message_id = None if msg is None else msg.id
             self._state.store_view(view, message_id)
 
@@ -2059,6 +2059,12 @@ class Webhook(BaseWebhook):
             the view is removed. The webhook must have state attached, similar to
             :meth:`send`.
 
+            .. note::
+
+                To update the message to add a :class:`~discord.ui.LayoutView`, you
+                must explicitly set the ``content``, ``embed``, ``embeds``, and
+                ``attachments`` parameters to either ``None`` or an empty array, as appropriate.
+
             .. versionadded:: 2.0
             .. versionchanged:: 2.6
                 This now accepts :class:`~discord.ui.LayoutView` instances.
@@ -2124,7 +2130,7 @@ class Webhook(BaseWebhook):
             )
 
         message = self._create_message(data, thread=thread)
-        if view and not view.is_finished():
+        if view and not view.is_finished() and view.is_dispatchable():
             self._state.store_view(view, message_id)
         return message
 

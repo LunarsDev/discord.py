@@ -42,19 +42,18 @@ from .enums import (
     TextStyle,
     ChannelType,
     SelectDefaultValueType,
-    SeparatorSize,
+    SeparatorSpacing,
     MediaItemLoadingState,
 )
 from .flags import AttachmentFlags
 from .colour import Colour
-from .utils import get_slots, MISSING
+from .utils import get_slots, MISSING, _get_as_snowflake
 from .partial_emoji import PartialEmoji, _EmojiTag
 
 if TYPE_CHECKING:
     from typing_extensions import Self
 
     from .types.components import (
-        ComponentBase as ComponentBasePayload,
         Component as ComponentPayload,
         ButtonComponent as ButtonComponentPayload,
         SelectMenu as SelectMenuPayload,
@@ -160,7 +159,7 @@ class Component:
                 setattr(self, slot, value)
         return self
 
-    def to_dict(self) -> ComponentBasePayload:
+    def to_dict(self) -> ComponentPayload:
         raise NotImplementedError
 
 
@@ -527,6 +526,9 @@ class SelectOption:
             payload['description'] = self.description
 
         return payload
+
+    def copy(self) -> SelectOption:
+        return self.__class__.from_dict(self.to_dict())
 
 
 class TextInput(Component):
@@ -905,7 +907,9 @@ class UnfurledMediaItem(AssetMixin):
     Parameters
     ----------
     url: :class:`str`
-        The URL of this media item.
+        The URL of this media item. This can be an arbitrary url or a reference to a local
+        file uploaded as an attachment within the message, which can be accessed with the
+        ``attachment://<filename>`` format.
 
     Attributes
     ----------
@@ -925,6 +929,9 @@ class UnfurledMediaItem(AssetMixin):
         The media item's placeholder.
     loading_state: Optional[:class:`MediaItemLoadingState`]
         The loading state of this media item.
+    attachment_id: Optional[:class:`int`]
+        The attachment id this media item points to, only available if the url points to a local file
+        uploaded within the component message.
     """
 
     __slots__ = (
@@ -936,6 +943,7 @@ class UnfurledMediaItem(AssetMixin):
         '_flags',
         'placeholder',
         'loading_state',
+        'attachment_id',
         '_state',
     )
 
@@ -949,6 +957,7 @@ class UnfurledMediaItem(AssetMixin):
         self._flags: int = 0
         self.placeholder: Optional[str] = None
         self.loading_state: Optional[MediaItemLoadingState] = None
+        self.attachment_id: Optional[int] = None
         self._state: Optional[ConnectionState] = None
 
     @property
@@ -963,13 +972,17 @@ class UnfurledMediaItem(AssetMixin):
         return self
 
     def _update(self, data: UnfurledMediaItemPayload, state: Optional[ConnectionState]) -> None:
-        self.proxy_url = data['proxy_url']
+        self.proxy_url = data.get('proxy_url')
         self.height = data.get('height')
         self.width = data.get('width')
         self.content_type = data.get('content_type')
         self._flags = data.get('flags', 0)
         self.placeholder = data.get('placeholder')
-        self.loading_state = try_enum(MediaItemLoadingState, data['loading_state'])
+
+        loading_state = data.get('loading_state')
+        if loading_state is not None:
+            self.loading_state = try_enum(MediaItemLoadingState, loading_state)
+        self.attachment_id = _get_as_snowflake(data, 'attachment_id')
         self._state = state
 
     def __repr__(self) -> str:
@@ -990,8 +1003,8 @@ class MediaGalleryItem:
     ----------
     media: Union[:class:`str`, :class:`UnfurledMediaItem`]
         The media item data. This can be a string representing a local
-        file uploaded as an attachment in the message, that can be accessed
-        using the ``attachment://file-name.extension`` format.
+        file uploaded as an attachment in the message, which can be accessed
+        using the ``attachment://<filename>`` format, or an arbitrary url.
     description: Optional[:class:`str`]
         The description to show within this item. Up to 256 characters. Defaults
         to ``None``.
@@ -1041,11 +1054,15 @@ class MediaGalleryItem:
         return [cls._from_data(item, state) for item in items]
 
     def to_dict(self) -> MediaGalleryItemPayload:
-        return {
+        payload: MediaGalleryItemPayload = {
             'media': self.media.to_dict(),  # type: ignore
-            'description': self.description,
             'spoiler': self.spoiler,
         }
+
+        if self.description:
+            payload['description'] = self.description
+
+        return payload
 
 
 class MediaGalleryComponent(Component):
@@ -1110,12 +1127,18 @@ class FileComponent(Component):
         Whether this file is flagged as a spoiler.
     id: Optional[:class:`int`]
         The ID of this component.
+    name: Optional[:class:`str`]
+        The displayed file name, only available when received from the API.
+    size: Optional[:class:`int`]
+        The file size in MiB, only available when received from the API.
     """
 
     __slots__ = (
         'media',
         'spoiler',
         'id',
+        'name',
+        'size',
     )
 
     __repr_info__ = __slots__
@@ -1124,6 +1147,8 @@ class FileComponent(Component):
         self.media: UnfurledMediaItem = UnfurledMediaItem._from_data(data['file'], state)
         self.spoiler: bool = data.get('spoiler', False)
         self.id: Optional[int] = data.get('id')
+        self.name: Optional[str] = data.get('name')
+        self.size: Optional[int] = data.get('size')
 
     @property
     def type(self) -> Literal[ComponentType.file]:
@@ -1154,7 +1179,7 @@ class SeparatorComponent(Component):
 
     Attributes
     ----------
-    spacing: :class:`SeparatorSize`
+    spacing: :class:`SeparatorSpacing`
         The spacing size of the separator.
     visible: :class:`bool`
         Whether this separator is visible and shows a divider.
@@ -1174,7 +1199,7 @@ class SeparatorComponent(Component):
         self,
         data: SeparatorComponentPayload,
     ) -> None:
-        self.spacing: SeparatorSize = try_enum(SeparatorSize, data.get('spacing', 1))
+        self.spacing: SeparatorSpacing = try_enum(SeparatorSpacing, data.get('spacing', 1))
         self.visible: bool = data.get('divider', True)
         self.id: Optional[int] = data.get('id')
 
@@ -1253,11 +1278,15 @@ class Container(Component):
 
     accent_color = accent_colour
 
+    @property
+    def type(self) -> Literal[ComponentType.container]:
+        return ComponentType.container
+
     def to_dict(self) -> ContainerComponentPayload:
         payload: ContainerComponentPayload = {
-            'type': self.type.value,  # type: ignore
+            'type': self.type.value,
             'spoiler': self.spoiler,
-            'components': [c.to_dict() for c in self.children],
+            'components': [c.to_dict() for c in self.children],  # pyright: ignore[reportAssignmentType]
         }
         if self.id is not None:
             payload['id'] = self.id
