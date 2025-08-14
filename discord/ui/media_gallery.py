@@ -54,29 +54,20 @@ class MediaGallery(Item[V]):
 
     Parameters
     ----------
-    *items: :class:`.MediaGalleryItem`
+    \*items: :class:`.MediaGalleryItem`
         The initial items of this gallery.
-    row: Optional[:class:`int`]
-        The relative row this media gallery belongs to. By default
-        items are arranged automatically into those rows. If you'd
-        like to control the relative positioning of the row then
-        passing an index is advised. For example, row=1 will show
-        up before row=2. Defaults to ``None``, which is automatic
-        ordering. The row number must be between 0 and 39 (i.e. zero indexed)
     id: Optional[:class:`int`]
         The ID of this component. This must be unique across the view.
     """
 
     __item_repr_attributes__ = (
         'items',
-        'row',
         'id',
     )
 
     def __init__(
         self,
         *items: MediaGalleryItem,
-        row: Optional[int] = None,
         id: Optional[int] = None,
     ) -> None:
         super().__init__()
@@ -86,11 +77,8 @@ class MediaGallery(Item[V]):
             id=id,
         )
 
-        self.row = row
-        self.id = id
-
     def __repr__(self) -> str:
-        return f'<{super().__repr__()[:-1]} items={len(self._underlying.items)}>'
+        return f'<{self.__class__.__name__} items={len(self._underlying.items)}>'
 
     @property
     def items(self) -> List[MediaGalleryItem]:
@@ -103,6 +91,15 @@ class MediaGallery(Item[V]):
             raise ValueError('media gallery only accepts up to 10 items')
 
         self._underlying.items = value
+
+    @property
+    def id(self) -> Optional[int]:
+        """Optional[:class:`int`]: The ID of this component."""
+        return self._underlying.id
+
+    @id.setter
+    def id(self, value: Optional[int]) -> None:
+        self._underlying.id = value
 
     def to_component_dict(self):
         return self._underlying.to_dict()
@@ -170,7 +167,7 @@ class MediaGallery(Item[V]):
             raise ValueError('maximum number of items has been exceeded')
 
         if not isinstance(item, MediaGalleryItem):
-            raise TypeError(f'expected MediaGalleryItem not {item.__class__.__name__}')
+            raise TypeError(f'expected MediaGalleryItem, not {item.__class__.__name__!r}')
 
         self._underlying.items.append(item)
         return self

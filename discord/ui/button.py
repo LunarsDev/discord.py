@@ -24,12 +24,13 @@ DEALINGS IN THE SOFTWARE.
 
 from __future__ import annotations
 
+import copy
 from typing import Callable, Literal, Optional, TYPE_CHECKING, Tuple, TypeVar, Union
 import inspect
 import os
 
 
-from .item import Item, ItemCallbackType
+from .item import Item, ContainedItemCallbackType as ItemCallbackType
 from ..enums import ButtonStyle, ComponentType
 from ..partial_emoji import PartialEmoji, _EmojiTag
 from ..components import Button as ButtonComponent
@@ -43,9 +44,11 @@ if TYPE_CHECKING:
     from typing_extensions import Self
 
     from .view import BaseView
+    from .action_row import ActionRow
     from ..emoji import Emoji
     from ..types.components import ButtonComponent as ButtonComponentPayload
 
+S = TypeVar('S', bound='Union[BaseView, ActionRow]', covariant=True)
 V = TypeVar('V', bound='BaseView', covariant=True)
 
 
@@ -77,6 +80,10 @@ class Button(Item[V]):
         like to control the relative positioning of the row then passing an index is advised.
         For example, row=1 will show up before row=2. Defaults to ``None``, which is automatic
         ordering. The row number must be between 0 and 4 (i.e. zero indexed).
+
+        .. note::
+
+            This parameter is ignored when used in a :class:`ActionRow` or v2 component.
     sku_id: Optional[:class:`int`]
         The SKU ID this button sends you to. Can't be combined with ``url``, ``label``, ``emoji``
         nor ``custom_id``.
@@ -152,7 +159,15 @@ class Button(Item[V]):
             id=id,
         )
         self.row = row
-        self.id = id
+
+    @property
+    def id(self) -> Optional[int]:
+        """Optional[:class:`int`]: The ID of this button."""
+        return self._underlying.id
+
+    @id.setter
+    def id(self, value: Optional[int]) -> None:
+        self._underlying.id = value
 
     @property
     def style(self) -> ButtonStyle:
@@ -268,11 +283,30 @@ class Button(Item[V]):
             return self.url is not None
         return super().is_persistent()
 
-    def _can_be_dynamic(self) -> bool:
-        return True
-
     def _refresh_component(self, button: ButtonComponent) -> None:
         self._underlying = button
+
+    def copy(self) -> Self:
+        new = copy.copy(self)
+        custom_id = self.custom_id
+
+        if self.custom_id is not None and not self._provided_custom_id:
+            custom_id = os.urandom(16).hex()
+
+        new._underlying = ButtonComponent._raw_construct(
+            custom_id=custom_id,
+            url=self.url,
+            disabled=self.disabled,
+            label=self.label,
+            style=self.style,
+            emoji=self.emoji,
+            sku_id=self.sku_id,
+            id=self.id,
+        )
+        return new
+
+    def __deepcopy__(self, memo) -> Self:
+        return self.copy()
 
 
 def button(
@@ -284,7 +318,7 @@ def button(
     emoji: Optional[Union[str, Emoji, PartialEmoji]] = None,
     row: Optional[int] = None,
     id: Optional[int] = None,
-) -> Callable[[ItemCallbackType[Button[V]]], Button[V]]:
+) -> Callable[[ItemCallbackType[S, Button[V]]], Button[V]]:
     """A decorator that attaches a button to a component.
 
     The function being decorated should have three parameters, ``self`` representing
@@ -321,13 +355,17 @@ def button(
         like to control the relative positioning of the row then passing an index is advised.
         For example, row=1 will show up before row=2. Defaults to ``None``, which is automatic
         ordering. The row number must be between 0 and 4 (i.e. zero indexed).
+
+        .. note::
+
+            This parameter is ignored when used in a :class:`ActionRow` or v2 component.
     id: Optional[:class:`int`]
         The ID of this component. This must be unique across the view.
 
         .. versionadded:: 2.6
     """
 
-    def decorator(func: ItemCallbackType[Button[V]]) -> ItemCallbackType[Button[V]]:
+    def decorator(func: ItemCallbackType[S, Button[V]]) -> ItemCallbackType[S, Button[V]]:
         if not inspect.iscoroutinefunction(func):
             raise TypeError('button function must be a coroutine function')
 

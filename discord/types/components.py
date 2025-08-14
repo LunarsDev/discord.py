@@ -30,11 +30,11 @@ from typing_extensions import NotRequired
 from .emoji import PartialEmoji
 from .channel import ChannelType
 
-ComponentType = Literal[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17]
+ComponentType = Literal[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 18]
 ButtonStyle = Literal[1, 2, 3, 4, 5, 6]
 TextStyle = Literal[1, 2]
 DefaultValueType = Literal['user', 'role', 'channel']
-SeparatorSize = Literal[1, 2]
+SeparatorSpacing = Literal[1, 2]
 MediaItemLoadingState = Literal[0, 1, 2, 3]
 
 
@@ -110,7 +110,7 @@ class TextInput(ComponentBase):
     type: Literal[4]
     custom_id: str
     style: TextStyle
-    label: str
+    label: Optional[str]
     placeholder: NotRequired[str]
     value: NotRequired[str]
     required: NotRequired[bool]
@@ -120,6 +120,7 @@ class TextInput(ComponentBase):
 
 class SelectMenu(SelectComponent):
     type: Literal[3, 5, 6, 7, 8]
+    required: NotRequired[bool]  # Only for StringSelect within modals
     options: NotRequired[List[SelectOption]]
     channel_types: NotRequired[List[ChannelType]]
     default_values: NotRequired[List[SelectDefaultValues]]
@@ -177,7 +178,7 @@ class FileComponent(ComponentBase):
 class SeparatorComponent(ComponentBase):
     type: Literal[14]
     divider: NotRequired[bool]
-    spacing: NotRequired[SeparatorSize]
+    spacing: NotRequired[SeparatorSpacing]
 
 
 class ContainerComponent(ComponentBase):
@@ -185,6 +186,13 @@ class ContainerComponent(ComponentBase):
     accent_color: NotRequired[int]
     spoiler: NotRequired[bool]
     components: List[ContainerChildComponent]
+
+
+class LabelComponent(ComponentBase):
+    type: Literal[18]
+    label: str
+    description: NotRequired[str]
+    component: Union[StringSelectComponent, TextInput]
 
 
 ActionRowChildComponent = Union[ButtonComponent, SelectMenu, TextInput]
@@ -199,4 +207,4 @@ ContainerChildComponent = Union[
     SeparatorComponent,
     ThumbnailComponent,
 ]
-Component = Union[ActionRowChildComponent, ContainerChildComponent]
+Component = Union[ActionRowChildComponent, LabelComponent, ContainerChildComponent]

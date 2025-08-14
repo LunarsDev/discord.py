@@ -81,6 +81,7 @@ if TYPE_CHECKING:
         invite,
         member,
         message,
+        onboarding,
         template,
         role,
         user,
@@ -1046,7 +1047,7 @@ class HTTPClient:
     def pin_message(self, channel_id: Snowflake, message_id: Snowflake, reason: Optional[str] = None) -> Response[None]:
         r = Route(
             'PUT',
-            '/channels/{channel_id}/pins/{message_id}',
+            '/channels/{channel_id}/messages/pins/{message_id}',
             channel_id=channel_id,
             message_id=message_id,
         )
@@ -1055,14 +1056,25 @@ class HTTPClient:
     def unpin_message(self, channel_id: Snowflake, message_id: Snowflake, reason: Optional[str] = None) -> Response[None]:
         r = Route(
             'DELETE',
-            '/channels/{channel_id}/pins/{message_id}',
+            '/channels/{channel_id}/messages/pins/{message_id}',
             channel_id=channel_id,
             message_id=message_id,
         )
         return self.request(r, reason=reason)
 
-    def pins_from(self, channel_id: Snowflake) -> Response[List[message.Message]]:
-        return self.request(Route('GET', '/channels/{channel_id}/pins', channel_id=channel_id))
+    def pins_from(
+        self,
+        channel_id: Snowflake,
+        limit: Optional[int] = None,
+        before: Optional[str] = None,
+    ) -> Response[message.ChannelPins]:
+        params = {}
+        if before is not None:
+            params['before'] = before
+        if limit is not None:
+            params['limit'] = limit
+
+        return self.request(Route('GET', '/channels/{channel_id}/messages/pins', channel_id=channel_id), params=params)
 
     # Member management
 
@@ -1869,12 +1881,10 @@ class HTTPClient:
         invite_id: str,
         *,
         with_counts: bool = True,
-        with_expiration: bool = True,
         guild_scheduled_event_id: Optional[Snowflake] = None,
     ) -> Response[invite.Invite]:
         params: Dict[str, Any] = {
             'with_counts': int(with_counts),
-            'with_expiration': int(with_expiration),
         }
 
         if guild_scheduled_event_id:
@@ -2545,6 +2555,42 @@ class HTTPClient:
                 application_id=application_id,
                 entitlement_id=entitlement_id,
             ),
+        )
+
+    # Guild Onboarding
+
+    def get_guild_onboarding(self, guild_id: Snowflake) -> Response[onboarding.Onboarding]:
+        return self.request(Route('GET', '/guilds/{guild_id}/onboarding', guild_id=guild_id))
+
+    def edit_guild_onboarding(
+        self,
+        guild_id: Snowflake,
+        *,
+        prompts: Optional[List[onboarding.Prompt]] = None,
+        default_channel_ids: Optional[List[Snowflake]] = None,
+        enabled: Optional[bool] = None,
+        mode: Optional[onboarding.OnboardingMode] = None,
+        reason: Optional[str],
+    ) -> Response[onboarding.Onboarding]:
+
+        payload = {}
+
+        if prompts is not None:
+            payload['prompts'] = prompts
+
+        if default_channel_ids is not None:
+            payload['default_channel_ids'] = default_channel_ids
+
+        if enabled is not None:
+            payload['enabled'] = enabled
+
+        if mode is not None:
+            payload['mode'] = mode
+
+        return self.request(
+            Route('PUT', f'/guilds/{guild_id}/onboarding', guild_id=guild_id),
+            json=payload,
+            reason=reason,
         )
 
     # Soundboard

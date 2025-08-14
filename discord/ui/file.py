@@ -66,13 +66,6 @@ class File(Item[V]):
         meet the ``attachment://<filename>`` format.
     spoiler: :class:`bool`
         Whether to flag this file as a spoiler. Defaults to ``False``.
-    row: Optional[:class:`int`]
-        The relative row this file component belongs to. By default
-        items are arranged automatically into those rows. If you'd
-        like to control the relative positioning of the row then
-        passing an index is advised. For example, row=1 will show
-        up before row=2. Defaults to ``None``, which is automatic
-        ordering. The row number must be between 0 and 39 (i.e. zero indexed)
     id: Optional[:class:`int`]
         The ID of this component. This must be unique across the view.
     """
@@ -80,7 +73,6 @@ class File(Item[V]):
     __item_repr_attributes__ = (
         'media',
         'spoiler',
-        'row',
         'id',
     )
 
@@ -89,7 +81,6 @@ class File(Item[V]):
         media: Union[str, UnfurledMediaItem],
         *,
         spoiler: bool = False,
-        row: Optional[int] = None,
         id: Optional[int] = None,
     ) -> None:
         super().__init__()
@@ -98,8 +89,6 @@ class File(Item[V]):
             spoiler=spoiler,
             id=id,
         )
-
-        self.row = row
         self.id = id
 
     def _is_v2(self):
@@ -119,8 +108,13 @@ class File(Item[V]):
         return self._underlying.media
 
     @media.setter
-    def media(self, value: UnfurledMediaItem) -> None:
-        self._underlying.media = value
+    def media(self, value: Union[str, UnfurledMediaItem]) -> None:
+        if isinstance(value, str):
+            self._underlying.media = UnfurledMediaItem(value)
+        elif isinstance(value, UnfurledMediaItem):
+            self._underlying.media = value
+        else:
+            raise TypeError(f'expected a str or UnfurledMediaItem, not {value.__class__.__name__!r}')
 
     @property
     def url(self) -> str:

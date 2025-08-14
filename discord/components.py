@@ -70,6 +70,7 @@ if TYPE_CHECKING:
         ThumbnailComponent as ThumbnailComponentPayload,
         ContainerComponent as ContainerComponentPayload,
         UnfurledMediaItem as UnfurledMediaItemPayload,
+        LabelComponent as LabelComponentPayload,
     )
 
     from .emoji import Emoji
@@ -77,7 +78,7 @@ if TYPE_CHECKING:
     from .state import ConnectionState
 
     ActionRowChildComponentType = Union['Button', 'SelectMenu', 'TextInput']
-    SectionComponentType = Union['TextDisplay', 'Button']
+    SectionComponentType = Union['TextDisplay']
     MessageComponentType = Union[
         ActionRowChildComponentType,
         SectionComponentType,
@@ -109,6 +110,7 @@ __all__ = (
     'Container',
     'TextDisplay',
     'SeparatorComponent',
+    'LabelComponent',
 )
 
 
@@ -349,6 +351,10 @@ class SelectMenu(Component):
         The ID of this component.
 
         .. versionadded:: 2.6
+    required: :class:`bool`
+        Whether the select is required. Only applicable within modals.
+
+        .. versionadded:: 2.6
     """
 
     __slots__: Tuple[str, ...] = (
@@ -361,6 +367,7 @@ class SelectMenu(Component):
         'disabled',
         'channel_types',
         'default_values',
+        'required',
         'id',
     )
 
@@ -372,6 +379,7 @@ class SelectMenu(Component):
         self.placeholder: Optional[str] = data.get('placeholder')
         self.min_values: int = data.get('min_values', 1)
         self.max_values: int = data.get('max_values', 1)
+        self.required: bool = data.get('required', False)
         self.options: List[SelectOption] = [SelectOption.from_dict(option) for option in data.get('options', [])]
         self.disabled: bool = data.get('disabled', False)
         self.channel_types: List[ChannelType] = [try_enum(ChannelType, t) for t in data.get('channel_types', [])]
@@ -544,7 +552,7 @@ class TextInput(Component):
     ------------
     custom_id: Optional[:class:`str`]
         The ID of the text input that gets received during an interaction.
-    label: :class:`str`
+    label: Optional[:class:`str`]
         The label to display above the text input.
     style: :class:`TextStyle`
         The style of the text input.
@@ -580,7 +588,7 @@ class TextInput(Component):
 
     def __init__(self, data: TextInputPayload, /) -> None:
         self.style: TextStyle = try_enum(TextStyle, data['style'])
-        self.label: str = data['label']
+        self.label: Optional[str] = data.get('label')
         self.custom_id: str = data['custom_id']
         self.placeholder: Optional[str] = data.get('placeholder')
         self.value: Optional[str] = data.get('value')
@@ -753,7 +761,7 @@ class SectionComponent(Component):
 
     Attributes
     ----------
-    components: List[Union[:class:`TextDisplay`, :class:`Button`]]
+    children: List[:class:`TextDisplay`]
         The components on this section.
     accessory: :class:`Component`
         The section accessory.
@@ -762,7 +770,7 @@ class SectionComponent(Component):
     """
 
     __slots__ = (
-        'components',
+        'children',
         'accessory',
         'id',
     )
@@ -770,14 +778,14 @@ class SectionComponent(Component):
     __repr_info__ = __slots__
 
     def __init__(self, data: SectionComponentPayload, state: Optional[ConnectionState]) -> None:
-        self.components: List[SectionComponentType] = []
+        self.children: List[SectionComponentType] = []
         self.accessory: Component = _component_factory(data['accessory'], state)  # type: ignore
         self.id: Optional[int] = data.get('id')
 
         for component_data in data['components']:
             component = _component_factory(component_data, state)
             if component is not None:
-                self.components.append(component)  # type: ignore # should be the correct type here
+                self.children.append(component)  # type: ignore # should be the correct type here
 
     @property
     def type(self) -> Literal[ComponentType.section]:
@@ -786,7 +794,7 @@ class SectionComponent(Component):
     def to_dict(self) -> SectionComponentPayload:
         payload: SectionComponentPayload = {
             'type': self.type.value,
-            'components': [c.to_dict() for c in self.components],
+            'components': [c.to_dict() for c in self.children],
             'accessory': self.accessory.to_dict(),
         }
 
@@ -1013,7 +1021,7 @@ class MediaGalleryItem:
     """
 
     __slots__ = (
-        'media',
+        '_media',
         'description',
         'spoiler',
         '_state',
@@ -1026,13 +1034,27 @@ class MediaGalleryItem:
         description: Optional[str] = None,
         spoiler: bool = False,
     ) -> None:
-        self.media: UnfurledMediaItem = UnfurledMediaItem(media) if isinstance(media, str) else media
+        self._media: UnfurledMediaItem = UnfurledMediaItem(media) if isinstance(media, str) else media
         self.description: Optional[str] = description
         self.spoiler: bool = spoiler
         self._state: Optional[ConnectionState] = None
 
     def __repr__(self) -> str:
         return f'<MediaGalleryItem media={self.media!r}>'
+
+    @property
+    def media(self) -> UnfurledMediaItem:
+        """:class:`UnfurledMediaItem`: This item's media data."""
+        return self._media
+
+    @media.setter
+    def media(self, value: Union[str, UnfurledMediaItem]) -> None:
+        if isinstance(value, str):
+            self._media = UnfurledMediaItem(value)
+        elif isinstance(value, UnfurledMediaItem):
+            self._media = value
+        else:
+            raise TypeError(f'Expected a str or UnfurledMediaItem, not {value.__class__.__name__}')
 
     @classmethod
     def _from_data(cls, data: MediaGalleryItemPayload, state: Optional[ConnectionState]) -> MediaGalleryItem:
@@ -1295,6 +1317,62 @@ class Container(Component):
         return payload
 
 
+class LabelComponent(Component):
+    """Represents a label component from the Discord Bot UI Kit.
+
+    This inherits from :class:`Component`.
+
+    .. note::
+
+        The user constructible and usable type for creating a label is
+        :class:`discord.ui.Label` not this one.
+
+    .. versionadded:: 2.6
+
+    Attributes
+    ----------
+    label: :class:`str`
+        The label text to display.
+    description: Optional[:class:`str`]
+        The description text to display below the label, if any.
+    component: :class:`Component`
+        The component that this label is associated with.
+    id: Optional[:class:`int`]
+        The ID of this component.
+    """
+
+    __slots__ = (
+        'label',
+        'description',
+        'commponent',
+        'id',
+    )
+
+    __repr_info__ = ('label', 'description', 'commponent', 'id,')
+
+    def __init__(self, data: LabelComponentPayload, state: Optional[ConnectionState]) -> None:
+        self.component: Component = _component_factory(data['component'], state)  # type: ignore
+        self.label: str = data['label']
+        self.id: Optional[int] = data.get('id')
+        self.description: Optional[str] = data.get('description')
+
+    @property
+    def type(self) -> Literal[ComponentType.label]:
+        return ComponentType.label
+
+    def to_dict(self) -> LabelComponentPayload:
+        payload: LabelComponentPayload = {
+            'type': self.type.value,
+            'label': self.label,
+            'component': self.component.to_dict(),  # type: ignore
+        }
+        if self.description:
+            payload['description'] = self.description
+        if self.id is not None:
+            payload['id'] = self.id
+        return payload
+
+
 def _component_factory(data: ComponentPayload, state: Optional[ConnectionState] = None) -> Optional[Component]:
     if data['type'] == 1:
         return ActionRow(data)
@@ -1318,3 +1396,5 @@ def _component_factory(data: ComponentPayload, state: Optional[ConnectionState] 
         return SeparatorComponent(data)
     elif data['type'] == 17:
         return Container(data, state)
+    elif data['type'] == 18:
+        return LabelComponent(data, state)

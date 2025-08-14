@@ -22,42 +22,51 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
 
+from __future__ import annotations
+from typing import TYPE_CHECKING, Literal, Optional, TypedDict, List, Union
+
+from .emoji import PartialEmoji
 from .snowflake import Snowflake
-from typing import Literal, Optional, TypedDict
-from typing_extensions import NotRequired
+
+if TYPE_CHECKING:
+    from typing_extensions import NotRequired
 
 
-class AvatarDecorationData(TypedDict):
-    asset: str
-    sku_id: Snowflake
+PromptType = Literal[0, 1]
+OnboardingMode = Literal[0, 1]
 
 
-class PartialUser(TypedDict):
+class _PromptOption(TypedDict):
+    channel_ids: List[Snowflake]
+    role_ids: List[Snowflake]
+    title: str
+    description: Optional[str]
+
+
+class CreatePromptOption(_PromptOption):
+    emoji_id: NotRequired[Snowflake]
+    emoji_name: NotRequired[str]
+    emoji_animated: NotRequired[bool]
+
+
+class PromptOption(_PromptOption):
     id: Snowflake
-    username: str
-    discriminator: str
-    avatar: Optional[str]
-    global_name: Optional[str]
-    avatar_decoration_data: NotRequired[AvatarDecorationData]
+    emoji: NotRequired[PartialEmoji]
 
 
-PremiumType = Literal[0, 1, 2, 3]
+class Prompt(TypedDict):
+    id: Snowflake
+    options: List[Union[PromptOption, CreatePromptOption]]
+    title: str
+    single_select: bool
+    required: bool
+    in_onboarding: bool
+    type: PromptType
 
 
-class User(PartialUser, total=False):
-    bot: bool
-    system: bool
-    mfa_enabled: bool
-    locale: str
-    verified: bool
-    email: Optional[str]
-    flags: int
-    premium_type: PremiumType
-    public_flags: int
-
-
-class PrimaryGuild(TypedDict):
-    identity_guild_id: Optional[int]
-    identity_enabled: Optional[bool]
-    tag: Optional[str]
-    badge: Optional[str]
+class Onboarding(TypedDict):
+    guild_id: Snowflake
+    prompts: List[Prompt]
+    default_channel_ids: List[Snowflake]
+    enabled: bool
+    mode: OnboardingMode

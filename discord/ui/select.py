@@ -42,7 +42,7 @@ from contextvars import ContextVar
 import inspect
 import os
 
-from .item import Item, ItemCallbackType
+from .item import Item, ContainedItemCallbackType as ItemCallbackType
 from ..enums import ChannelType, ComponentType, SelectDefaultValueType
 from ..partial_emoji import PartialEmoji
 from ..emoji import Emoji
@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from typing_extensions import TypeAlias, TypeGuard
 
     from .view import BaseView
+    from .action_row import ActionRow
     from ..types.components import SelectMenu as SelectMenuPayload
     from ..types.interactions import SelectMessageComponentInteractionData
     from ..app_commands import AppCommandChannel, AppCommandThread
@@ -101,6 +102,7 @@ if TYPE_CHECKING:
         Thread,
     ]
 
+S = TypeVar('S', bound='Union[BaseView, ActionRow]', covariant=True)
 V = TypeVar('V', bound='BaseView', covariant=True)
 BaseSelectT = TypeVar('BaseSelectT', bound='BaseSelect[Any]')
 SelectT = TypeVar('SelectT', bound='Select[Any]')
@@ -108,7 +110,7 @@ UserSelectT = TypeVar('UserSelectT', bound='UserSelect[Any]')
 RoleSelectT = TypeVar('RoleSelectT', bound='RoleSelect[Any]')
 ChannelSelectT = TypeVar('ChannelSelectT', bound='ChannelSelect[Any]')
 MentionableSelectT = TypeVar('MentionableSelectT', bound='MentionableSelect[Any]')
-SelectCallbackDecorator: TypeAlias = Callable[[ItemCallbackType[BaseSelectT]], BaseSelectT]
+SelectCallbackDecorator: TypeAlias = Callable[['ItemCallbackType[S, BaseSelectT]'], BaseSelectT]
 DefaultSelectComponentTypes = Literal[
     ComponentType.user_select,
     ComponentType.role_select,
@@ -237,6 +239,7 @@ class BaseSelect(Item[V]):
         min_values: Optional[int] = None,
         max_values: Optional[int] = None,
         disabled: bool = False,
+        required: bool = False,
         options: List[SelectOption] = MISSING,
         channel_types: List[ChannelType] = MISSING,
         default_values: Sequence[SelectDefaultValue] = MISSING,
@@ -255,6 +258,7 @@ class BaseSelect(Item[V]):
             min_values=min_values,
             max_values=max_values,
             disabled=disabled,
+            required=required,
             channel_types=[] if channel_types is MISSING else channel_types,
             options=[] if options is MISSING else options,
             default_values=[] if default_values is MISSING else default_values,
@@ -262,8 +266,16 @@ class BaseSelect(Item[V]):
         )
 
         self.row = row
-        self.id = id
         self._values: List[PossibleValue] = []
+
+    @property
+    def id(self) -> Optional[int]:
+        """Optional[:class:`int`]: The ID of this select."""
+        return self._underlying.id
+
+    @id.setter
+    def id(self, value: Optional[int]) -> None:
+        self._underlying.id = value
 
     @property
     def values(self) -> List[PossibleValue]:
@@ -323,6 +335,18 @@ class BaseSelect(Item[V]):
         self._underlying.disabled = bool(value)
 
     @property
+    def required(self) -> bool:
+        """:class:`bool`: Whether the select is required or not. Only supported in modals.
+
+        .. versionadded:: 2.6
+        """
+        return self._underlying.required
+
+    @required.setter
+    def required(self, value: bool) -> None:
+        self._underlying.required = bool(value)
+
+    @property
     def width(self) -> int:
         return 5
 
@@ -362,9 +386,6 @@ class BaseSelect(Item[V]):
         kwrgs = {key: getattr(component, key) for key in constructor.__component_attributes__}
         return constructor(**kwrgs)
 
-    def _can_be_dynamic(self) -> bool:
-        return True
-
 
 class Select(BaseSelect[V]):
     """Represents a UI select menu with a list of custom options. This is represented
@@ -392,12 +413,20 @@ class Select(BaseSelect[V]):
         Can only contain up to 25 items.
     disabled: :class:`bool`
         Whether the select is disabled or not.
+    required: :class:`bool`
+        Whether the select is required. Only applicable within modals.
+
+        .. versionadded:: 2.6
     row: Optional[:class:`int`]
         The relative row this select menu belongs to. A Discord component can only have 5
         rows. By default, items are arranged automatically into those 5 rows. If you'd
         like to control the relative positioning of the row then passing an index is advised.
         For example, row=1 will show up before row=2. Defaults to ``None``, which is automatic
         ordering. The row number must be between 0 and 4 (i.e. zero indexed).
+
+        .. note::
+
+            This parameter is ignored when used in a :class:`ActionRow` or v2 component.
     id: Optional[:class:`int`]
         The ID of the component. This must be unique across the view.
 
@@ -415,6 +444,7 @@ class Select(BaseSelect[V]):
         max_values: int = 1,
         options: List[SelectOption] = MISSING,
         disabled: bool = False,
+        required: bool = True,
         row: Optional[int] = None,
         id: Optional[int] = None,
     ) -> None:
@@ -425,6 +455,7 @@ class Select(BaseSelect[V]):
             min_values=min_values,
             max_values=max_values,
             disabled=disabled,
+            required=required,
             options=options,
             row=row,
             id=id,
@@ -559,6 +590,10 @@ class UserSelect(BaseSelect[V]):
         like to control the relative positioning of the row then passing an index is advised.
         For example, row=1 will show up before row=2. Defaults to ``None``, which is automatic
         ordering. The row number must be between 0 and 4 (i.e. zero indexed).
+
+        .. note::
+
+            This parameter is ignored when used in a :class:`ActionRow` or v2 component.
     id: Optional[:class:`int`]
         The ID of the component. This must be unique across the view.
 
@@ -657,6 +692,10 @@ class RoleSelect(BaseSelect[V]):
         like to control the relative positioning of the row then passing an index is advised.
         For example, row=1 will show up before row=2. Defaults to ``None``, which is automatic
         ordering. The row number must be between 0 and 4 (i.e. zero indexed).
+
+        .. note::
+
+            This parameter is ignored when used in a :class:`ActionRow` or v2 component.
     id: Optional[:class:`int`]
         The ID of the component. This must be unique across the view.
 
@@ -751,6 +790,10 @@ class MentionableSelect(BaseSelect[V]):
         like to control the relative positioning of the row then passing an index is advised.
         For example, row=1 will show up before row=2. Defaults to ``None``, which is automatic
         ordering. The row number must be between 0 and 4 (i.e. zero indexed).
+
+        .. note::
+
+            This parameter is ignored when used in a :class:`ActionRow` or v2 component.
     id: Optional[:class:`int`]
         The ID of the component. This must be unique across the view.
 
@@ -851,6 +894,10 @@ class ChannelSelect(BaseSelect[V]):
         like to control the relative positioning of the row then passing an index is advised.
         For example, row=1 will show up before row=2. Defaults to ``None``, which is automatic
         ordering. The row number must be between 0 and 4 (i.e. zero indexed).
+
+        .. note::
+
+            This parameter is ignored when used in a :class:`ActionRow` or v2 component.
     id: Optional[:class:`int`]
         The ID of the component. This must be unique across the view.
 
@@ -938,7 +985,7 @@ def select(
     disabled: bool = ...,
     row: Optional[int] = ...,
     id: Optional[int] = ...,
-) -> SelectCallbackDecorator[SelectT]:
+) -> SelectCallbackDecorator[S, SelectT]:
     ...
 
 
@@ -956,7 +1003,7 @@ def select(
     default_values: Sequence[ValidDefaultValues] = ...,
     row: Optional[int] = ...,
     id: Optional[int] = ...,
-) -> SelectCallbackDecorator[UserSelectT]:
+) -> SelectCallbackDecorator[S, UserSelectT]:
     ...
 
 
@@ -974,7 +1021,7 @@ def select(
     default_values: Sequence[ValidDefaultValues] = ...,
     row: Optional[int] = ...,
     id: Optional[int] = ...,
-) -> SelectCallbackDecorator[RoleSelectT]:
+) -> SelectCallbackDecorator[S, RoleSelectT]:
     ...
 
 
@@ -992,7 +1039,7 @@ def select(
     default_values: Sequence[ValidDefaultValues] = ...,
     row: Optional[int] = ...,
     id: Optional[int] = ...,
-) -> SelectCallbackDecorator[ChannelSelectT]:
+) -> SelectCallbackDecorator[S, ChannelSelectT]:
     ...
 
 
@@ -1010,7 +1057,7 @@ def select(
     default_values: Sequence[ValidDefaultValues] = ...,
     row: Optional[int] = ...,
     id: Optional[int] = ...,
-) -> SelectCallbackDecorator[MentionableSelectT]:
+) -> SelectCallbackDecorator[S, MentionableSelectT]:
     ...
 
 
@@ -1027,7 +1074,7 @@ def select(
     default_values: Sequence[ValidDefaultValues] = MISSING,
     row: Optional[int] = None,
     id: Optional[int] = None,
-) -> SelectCallbackDecorator[BaseSelectT]:
+) -> SelectCallbackDecorator[S, BaseSelectT]:
     """A decorator that attaches a select menu to a component.
 
     The function being decorated should have three parameters, ``self`` representing
@@ -1085,6 +1132,10 @@ def select(
         like to control the relative positioning of the row then passing an index is advised.
         For example, row=1 will show up before row=2. Defaults to ``None``, which is automatic
         ordering. The row number must be between 0 and 4 (i.e. zero indexed).
+
+        .. note::
+
+            This parameter is ignored when used in a :class:`ActionRow` or v2 component.
     min_values: :class:`int`
         The minimum number of items that must be chosen for this select menu.
         Defaults to 1 and must be between 0 and 25.
@@ -1112,7 +1163,7 @@ def select(
         .. versionadded:: 2.6
     """
 
-    def decorator(func: ItemCallbackType[BaseSelectT]) -> ItemCallbackType[BaseSelectT]:
+    def decorator(func: ItemCallbackType[S, BaseSelectT]) -> ItemCallbackType[S, BaseSelectT]:
         if not inspect.iscoroutinefunction(func):
             raise TypeError('select function must be a coroutine function')
         callback_cls = getattr(cls, '__origin__', cls)

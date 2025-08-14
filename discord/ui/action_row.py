@@ -23,7 +23,6 @@ DEALINGS IN THE SOFTWARE.
 """
 from __future__ import annotations
 
-import sys
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -42,7 +41,7 @@ from typing import (
     overload,
 )
 
-from .item import Item, ItemCallbackType
+from .item import Item, ContainedItemCallbackType as ItemCallbackType
 from .button import Button, button as _button
 from .select import select as _select, Select, UserSelect, RoleSelect, ChannelSelect, MentionableSelect
 from ..components import ActionRow as ActionRowComponent
@@ -62,12 +61,14 @@ if TYPE_CHECKING:
         RoleSelectT,
         UserSelectT,
         SelectT,
-        SelectCallbackDecorator,
     )
     from ..emoji import Emoji
     from ..components import SelectOption
     from ..interactions import Interaction
 
+    SelectCallbackDecorator = Callable[[ItemCallbackType['S', BaseSelectT]], BaseSelectT]
+
+S = TypeVar('S', bound='ActionRow', covariant=True)
 V = TypeVar('V', bound='LayoutView', covariant=True)
 
 __all__ = ('ActionRow',)
@@ -76,8 +77,8 @@ __all__ = ('ActionRow',)
 class _ActionRowCallback:
     __slots__ = ('row', 'callback', 'item')
 
-    def __init__(self, callback: ItemCallbackType[Any], row: ActionRow, item: Item[Any]) -> None:
-        self.callback: ItemCallbackType[Any] = callback
+    def __init__(self, callback: ItemCallbackType[S, Any], row: ActionRow, item: Item[Any]) -> None:
+        self.callback: ItemCallbackType[Any, Any] = callback
         self.row: ActionRow = row
         self.item: Item[Any] = item
 
@@ -91,11 +92,7 @@ class ActionRow(Item[V]):
     This is a top-level layout component that can only be used on :class:`LayoutView`
     and can contain :class:`Button`\s and :class:`Select`\s in it.
 
-    This can be inherited.
-
-    .. note::
-
-        Action rows can contain up to 5 components, which is, 5 buttons or 1 select.
+    Action rows can only have 5 children. This can be inherited.
 
     .. versionadded:: 2.6
 
@@ -119,56 +116,42 @@ class ActionRow(Item[V]):
             # or you can use your subclass:
             # row = MyActionRow()
 
-            # you can create items with row.button and row.select
+            # you can add items with row.button and row.select
             @row.button(label='A button!')
             async def row_button(self, interaction: discord.Interaction, button: discord.ui.Button):
                 await interaction.response.send_message('You clicked a button!')
 
     Parameters
     ----------
-    *children: :class:`Item`
+    \*children: :class:`Item`
         The initial children of this action row.
-    row: Optional[:class:`int`]
-        The relative row this action row belongs to. By default
-        items are arranged automatically into those rows. If you'd
-        like to control the relative positioning of the row then
-        passing an index is advised. For example, row=1 will show
-        up before row=2. Defaults to ``None``, which is automatic
-        ordering. The row number must be between 0 and 39 (i.e. zero indexed)
     id: Optional[:class:`int`]
         The ID of this component. This must be unique across the view.
     """
 
-    __action_row_children_items__: ClassVar[List[ItemCallbackType[Any]]] = []
+    __action_row_children_items__: ClassVar[List[ItemCallbackType[Self, Any]]] = []
     __discord_ui_action_row__: ClassVar[bool] = True
-    __discord_ui_update_view__: ClassVar[bool] = True
-    __item_repr_attributes__ = (
-        'row',
-        'id',
-    )
+    __item_repr_attributes__ = ('id',)
 
     def __init__(
         self,
         *children: Item[V],
-        row: Optional[int] = None,
         id: Optional[int] = None,
     ) -> None:
         super().__init__()
-        self._weight: int = 0
         self._children: List[Item[V]] = self._init_children()
         self._children.extend(children)
-        self._weight += sum(i.width for i in children)
+        self._weight: int = sum(i.width for i in self._children)
 
         if self._weight > 5:
             raise ValueError('maximum number of children exceeded')
 
         self.id = id
-        self.row = row
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
 
-        children: Dict[str, ItemCallbackType[Any]] = {}
+        children: Dict[str, ItemCallbackType[Self, Any]] = {}
         for base in reversed(cls.__mro__):
             for name, member in base.__dict__.items():
                 if hasattr(member, '__discord_ui_model_type__'):
@@ -180,7 +163,7 @@ class ActionRow(Item[V]):
         cls.__action_row_children_items__ = list(children.values())
 
     def __repr__(self) -> str:
-        return f'{super().__repr__()[:-1]} children={len(self._children)}>'
+        return f'<{self.__class__.__name__} children={len(self._children)}>'
 
     def _init_children(self) -> List[Item[Any]]:
         children = []
@@ -190,13 +173,16 @@ class ActionRow(Item[V]):
             item.callback = _ActionRowCallback(func, self, item)  # type: ignore
             item._parent = getattr(func, '__discord_ui_parent__', self)
             setattr(self, func.__name__, item)
-            self._weight += item.width
             children.append(item)
         return children
 
-    def _update_children_view(self, view: LayoutView) -> None:
+    def _update_view(self, view) -> None:
+        self._view = view
         for child in self._children:
-            child._view = view  # pyright: ignore[reportAttributeAccessIssue]
+            child._view = view
+
+    def _has_children(self):
+        return True
 
     def _is_v2(self) -> bool:
         # although it is not really a v2 component the only usecase here is for
@@ -220,8 +206,8 @@ class ActionRow(Item[V]):
         return self._children.copy()
 
     def walk_children(self) -> Generator[Item[V], Any, None]:
-        """An iterator that recursively walks through all the children of this view
-        and it's children, if applicable.
+        """An iterator that recursively walks through all the children of this action row
+        and its children, if applicable.
 
         Yields
         ------
@@ -233,7 +219,7 @@ class ActionRow(Item[V]):
             yield child
 
     def add_item(self, item: Item[Any]) -> Self:
-        """Adds an item to this row.
+        """Adds an item to this action row.
 
         This function returns the class instance to allow for fluent-style
         chaining.
@@ -241,7 +227,7 @@ class ActionRow(Item[V]):
         Parameters
         ----------
         item: :class:`Item`
-            The item to add to the row.
+            The item to add to the action row.
 
         Raises
         ------
@@ -251,23 +237,27 @@ class ActionRow(Item[V]):
             Maximum number of children has been exceeded (5).
         """
 
+        if (self._weight + item.width) > 5:
+            raise ValueError('maximum number of children exceeded')
+
         if len(self._children) >= 5:
             raise ValueError('maximum number of children exceeded')
 
         if not isinstance(item, Item):
             raise TypeError(f'expected Item not {item.__class__.__name__}')
 
-        item._view = self._view
+        item._update_view(self.view)
         item._parent = self
+        self._weight += 1
         self._children.append(item)
 
-        if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
+        if self._view:
             self._view._total_children += 1
 
         return self
 
     def remove_item(self, item: Item[Any]) -> Self:
-        """Removes an item from the row.
+        """Removes an item from the action row.
 
         This function returns the class instance to allow for fluent-style
         chaining.
@@ -275,7 +265,7 @@ class ActionRow(Item[V]):
         Parameters
         ----------
         item: :class:`Item`
-            The item to remove from the view.
+            The item to remove from the action row.
         """
 
         try:
@@ -283,12 +273,13 @@ class ActionRow(Item[V]):
         except ValueError:
             pass
         else:
-            if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
+            if self._view and self._view._is_layout():
                 self._view._total_children -= 1
+            self._weight -= 1
 
         return self
 
-    def get_item(self, id: int, /) -> Optional[Item[V]]:
+    def find_item(self, id: int, /) -> Optional[Item[V]]:
         """Gets an item with :attr:`Item.id` set as ``id``, or ``None`` if
         not found.
 
@@ -309,27 +300,20 @@ class ActionRow(Item[V]):
         return _utils_get(self.walk_children(), id=id)
 
     def clear_items(self) -> Self:
-        """Removes all items from the row.
+        """Removes all items from the action row.
 
         This function returns the class instance to allow for fluent-style
         chaining.
         """
-        if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
+        if self._view and self._view._is_layout():
             self._view._total_children -= len(self._children)
         self._children.clear()
+        self._weight = 0
         return self
 
     def to_component_dict(self) -> Dict[str, Any]:
         components = []
-
-        def key(item: Item) -> int:
-            if item._rendered_row is not None:
-                return item._rendered_row
-            if item._row is not None:
-                return item._row
-            return sys.maxsize
-
-        for component in sorted(self.children, key=key):
+        for component in self.children:
             components.append(component.to_component_dict())
 
         base = {
@@ -348,13 +332,13 @@ class ActionRow(Item[V]):
         disabled: bool = False,
         style: ButtonStyle = ButtonStyle.secondary,
         emoji: Optional[Union[str, Emoji, PartialEmoji]] = None,
-    ) -> Callable[[ItemCallbackType[Button[V]]], Button[V]]:
-        """A decorator that attaches a button to a component.
+        id: Optional[int] = None,
+    ) -> Callable[[ItemCallbackType[S, Button[V]]], Button[V]]:
+        """A decorator that attaches a button to the action row.
 
         The function being decorated should have three parameters, ``self`` representing
-        the :class:`discord.ui.LayoutView`, the :class:`discord.Interaction` you receive and
+        the :class:`discord.ui.ActionRow`, the :class:`discord.Interaction` you receive and
         the :class:`discord.ui.Button` being pressed.
-
         .. note::
 
             Buttons with a URL or a SKU cannot be created with this function.
@@ -379,9 +363,13 @@ class ActionRow(Item[V]):
         emoji: Optional[Union[:class:`str`, :class:`.Emoji`, :class:`.PartialEmoji`]]
             The emoji of the button. This can be in string form or a :class:`.PartialEmoji`
             or a full :class:`.Emoji`.
+        id: Optional[:class:`int`]
+            The ID of the component. This must be unique across the view.
+
+            .. versionadded:: 2.6
         """
 
-        def decorator(func: ItemCallbackType[Button[V]]) -> ItemCallbackType[Button[V]]:
+        def decorator(func: ItemCallbackType[S, Button[V]]) -> ItemCallbackType[S, Button[V]]:
             ret = _button(
                 label=label,
                 custom_id=custom_id,
@@ -389,6 +377,7 @@ class ActionRow(Item[V]):
                 style=style,
                 emoji=emoji,
                 row=None,
+                id=id,
             )(func)
             ret.__discord_ui_parent__ = self  # type: ignore
             return ret  # type: ignore
@@ -407,7 +396,8 @@ class ActionRow(Item[V]):
         min_values: int = ...,
         max_values: int = ...,
         disabled: bool = ...,
-    ) -> SelectCallbackDecorator[SelectT]:
+        id: Optional[int] = ...,
+    ) -> SelectCallbackDecorator[S, SelectT]:
         ...
 
     @overload
@@ -423,7 +413,8 @@ class ActionRow(Item[V]):
         max_values: int = ...,
         disabled: bool = ...,
         default_values: Sequence[ValidDefaultValues] = ...,
-    ) -> SelectCallbackDecorator[UserSelectT]:
+        id: Optional[int] = ...,
+    ) -> SelectCallbackDecorator[S, UserSelectT]:
         ...
 
     @overload
@@ -439,7 +430,8 @@ class ActionRow(Item[V]):
         max_values: int = ...,
         disabled: bool = ...,
         default_values: Sequence[ValidDefaultValues] = ...,
-    ) -> SelectCallbackDecorator[RoleSelectT]:
+        id: Optional[int] = ...,
+    ) -> SelectCallbackDecorator[S, RoleSelectT]:
         ...
 
     @overload
@@ -455,7 +447,8 @@ class ActionRow(Item[V]):
         max_values: int = ...,
         disabled: bool = ...,
         default_values: Sequence[ValidDefaultValues] = ...,
-    ) -> SelectCallbackDecorator[ChannelSelectT]:
+        id: Optional[int] = ...,
+    ) -> SelectCallbackDecorator[S, ChannelSelectT]:
         ...
 
     @overload
@@ -471,7 +464,8 @@ class ActionRow(Item[V]):
         max_values: int = ...,
         disabled: bool = ...,
         default_values: Sequence[ValidDefaultValues] = ...,
-    ) -> SelectCallbackDecorator[MentionableSelectT]:
+        id: Optional[int] = ...,
+    ) -> SelectCallbackDecorator[S, MentionableSelectT]:
         ...
 
     def select(
@@ -486,11 +480,12 @@ class ActionRow(Item[V]):
         max_values: int = 1,
         disabled: bool = False,
         default_values: Sequence[ValidDefaultValues] = MISSING,
-    ) -> SelectCallbackDecorator[BaseSelectT]:
-        """A decorator that attaches a select menu to a component.
+        id: Optional[int] = None,
+    ) -> SelectCallbackDecorator[S, BaseSelectT]:
+        """A decorator that attaches a select menu to the action row.
 
         The function being decorated should have three parameters, ``self`` representing
-        the :class:`discord.ui.LayoutView`, the :class:`discord.Interaction` you receive and
+        the :class:`discord.ui.ActionRow`, the :class:`discord.Interaction` you receive and
         the chosen select class.
 
         To obtain the selected values inside the callback, you can use the ``values`` attribute of the chosen class in the callback. The list of values
@@ -514,9 +509,10 @@ class ActionRow(Item[V]):
         ---------
         .. code-block:: python3
 
-            class ActionRow(discord.ui.ActionRow):
+            class MyView(discord.ui.LayoutView):
+                action_row = discord.ui.ActionRow()
 
-                @discord.ui.select(cls=ChannelSelect, channel_types=[discord.ChannelType.text])
+                @action_row.select(cls=ChannelSelect, channel_types=[discord.ChannelType.text])
                 async def select_channels(self, interaction: discord.Interaction, select: ChannelSelect):
                     return await interaction.response.send_message(f'You selected {select.values[0].mention}')
 
@@ -554,9 +550,13 @@ class ActionRow(Item[V]):
             A list of objects representing the default values for the select menu. This cannot be used with regular :class:`Select` instances.
             If ``cls`` is :class:`MentionableSelect` and :class:`.Object` is passed, then the type must be specified in the constructor.
             Number of items must be in range of ``min_values`` and ``max_values``.
+        id: Optional[:class:`int`]
+            The ID of the component. This must be unique across the view.
+
+            .. versionadded:: 2.6
         """
 
-        def decorator(func: ItemCallbackType[BaseSelectT]) -> ItemCallbackType[BaseSelectT]:
+        def decorator(func: ItemCallbackType[S, BaseSelectT]) -> ItemCallbackType[S, BaseSelectT]:
             r = _select(  # type: ignore
                 cls=cls,  # type: ignore
                 placeholder=placeholder,
@@ -567,6 +567,7 @@ class ActionRow(Item[V]):
                 channel_types=channel_types,
                 disabled=disabled,
                 default_values=default_values,
+                id=id,
             )(func)
             r.__discord_ui_parent__ = self
             return r

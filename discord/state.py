@@ -1393,6 +1393,12 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
             _log.debug('GUILD_MEMBER_ADD referencing an unknown guild ID: %s. Discarding.', data['guild_id'])
             return
 
+        member_id = int(data['user']['id'])
+        member = guild.get_member(member_id)
+        if member is not None:
+            _log.debug('GUILD_MEMBER_ADD referencing an already cached member ID: %s. Discarding.', member_id)
+            return
+
         self.loop.create_task(self.member_to_db(guild.id, data))  # type: ignore
         self.loop.create_task(self.user_to_db(data['user']))
         member = Member(guild=guild, data=data, state=self)
@@ -2089,7 +2095,7 @@ class ConnectionState(Generic[DatabaseT, ClientT]):
             return channel.guild.get_member(user_id)
         return self.get_user(user_id)
 
-    def get_reaction_emoji(self, data: PartialEmojiPayload) -> Union[Emoji, PartialEmoji, str]:
+    def get_emoji_from_partial_payload(self, data: PartialEmojiPayload) -> Union[Emoji, PartialEmoji, str]:
         emoji_id = utils._get_as_snowflake(data, 'id')
 
         if not emoji_id:

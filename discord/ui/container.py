@@ -21,11 +21,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
+
 from __future__ import annotations
 
 import copy
-import os
-import sys
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -40,10 +39,10 @@ from typing import (
     Union,
 )
 
-from .item import Item, ItemCallbackType
+from .item import Item, ContainedItemCallbackType as ItemCallbackType
 from .view import _component_to_item, LayoutView
 from ..enums import ComponentType
-from ..utils import MISSING, get as _utils_get
+from ..utils import get as _utils_get
 from ..colour import Colour, Color
 
 if TYPE_CHECKING:
@@ -52,6 +51,7 @@ if TYPE_CHECKING:
     from ..components import Container as ContainerComponent
     from ..interactions import Interaction
 
+S = TypeVar('S', bound='Container', covariant=True)
 V = TypeVar('V', bound='LayoutView', covariant=True)
 
 __all__ = ('Container',)
@@ -60,8 +60,8 @@ __all__ = ('Container',)
 class _ContainerCallback:
     __slots__ = ('container', 'callback', 'item')
 
-    def __init__(self, callback: ItemCallbackType[Any], container: Container, item: Item[Any]) -> None:
-        self.callback: ItemCallbackType[Any] = callback
+    def __init__(self, callback: ItemCallbackType[S, Any], container: Container, item: Item[Any]) -> None:
+        self.callback: ItemCallbackType[Any, Any] = callback
         self.container: Container = container
         self.item: Item[Any] = item
 
@@ -74,7 +74,7 @@ class Container(Item[V]):
 
     This is a top-level layout component that can only be used on :class:`LayoutView`
     and can contain :class:`ActionRow`\s, :class:`TextDisplay`\s, :class:`Section`\s,
-    :class:`MediaGallery`\s, and :class:`File`\s in it.
+    :class:`MediaGallery`\s, :class:`File`\s, and :class:`Separator`\s in it.
 
     This can be inherited.
 
@@ -106,7 +106,7 @@ class Container(Item[V]):
 
     Parameters
     ----------
-    *children: :class:`Item`
+    \*children: :class:`Item`
         The initial children of this container.
     accent_colour: Optional[Union[:class:`.Colour`, :class:`int`]]
         The colour of the container. Defaults to ``None``.
@@ -115,24 +115,15 @@ class Container(Item[V]):
     spoiler: :class:`bool`
         Whether to flag this container as a spoiler. Defaults
         to ``False``.
-    row: Optional[:class:`int`]
-        The relative row this container belongs to. By default
-        items are arranged automatically into those rows. If you'd
-        like to control the relative positioning of the row then
-        passing an index is advised. For example, row=1 will show
-        up before row=2. Defaults to ``None``, which is automatic
-        ordering. The row number must be between 0 and 39 (i.e. zero indexed)
     id: Optional[:class:`int`]
         The ID of this component. This must be unique across the view.
     """
 
-    __container_children_items__: ClassVar[Dict[str, Union[ItemCallbackType[Any], Item[Any]]]] = {}
-    __discord_ui_update_view__: ClassVar[bool] = True
+    __container_children_items__: ClassVar[Dict[str, Union[ItemCallbackType[Self, Any], Item[Any]]]] = {}
     __discord_ui_container__: ClassVar[bool] = True
     __item_repr_attributes__ = (
         'accent_colour',
         'spoiler',
-        'row',
         'id',
     )
 
@@ -142,24 +133,19 @@ class Container(Item[V]):
         accent_colour: Optional[Union[Colour, int]] = None,
         accent_color: Optional[Union[Color, int]] = None,
         spoiler: bool = False,
-        row: Optional[int] = None,
         id: Optional[int] = None,
     ) -> None:
         super().__init__()
         self._children: List[Item[V]] = self._init_children()
-
-        if children is not MISSING:
-            for child in children:
-                self.add_item(child)
+        for child in children:
+            self.add_item(child)
 
         self.spoiler: bool = spoiler
         self._colour = accent_colour if accent_colour is not None else accent_color
-
-        self.row = row
         self.id = id
 
     def __repr__(self) -> str:
-        return f'<{super().__repr__()[:-1]} children={len(self._children)}>'
+        return f'<{self.__class__.__name__} children={len(self._children)}>'
 
     def _init_children(self) -> List[Item[Any]]:
         children = []
@@ -167,18 +153,10 @@ class Container(Item[V]):
 
         for name, raw in self.__container_children_items__.items():
             if isinstance(raw, Item):
-                item = copy.deepcopy(raw)
+                item = raw.copy()
                 item._parent = self
-                if getattr(item, '__discord_ui_action_row__', False) and item.is_dispatchable():
-                    if item.is_dispatchable():
-                        self.__dispatchable.extend(item._children)  # type: ignore
-                if getattr(item, '__discord_ui_section__', False) and item.accessory.is_dispatchable():  # type: ignore
-                    if item.accessory._provided_custom_id is False:  # type: ignore
-                        item.accessory.custom_id = os.urandom(16).hex()  # type: ignore
-
                 setattr(self, name, item)
                 children.append(item)
-
                 parents[raw] = item
             else:
                 # action rows can be created inside containers, and then callbacks can exist here
@@ -191,9 +169,9 @@ class Container(Item[V]):
                 # guarding it
                 parent = getattr(raw, '__discord_ui_parent__', None)
                 if parent is None:
-                    raise RuntimeError(f'{raw.__name__} is not a valid item for a Container')
+                    raise ValueError(f'{raw.__name__} is not a valid item for a Container')
                 parents.get(parent, parent)._children.append(item)
-                # we donnot append it to the children list because technically these buttons and
+                # we do not append it to the children list because technically these buttons and
                 # selects are not from the container but the action row itself.
 
         return children
@@ -201,7 +179,7 @@ class Container(Item[V]):
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
 
-        children: Dict[str, Union[ItemCallbackType[Any], Item[Any]]] = {}
+        children: Dict[str, Union[ItemCallbackType[Self, Any], Item[Any]]] = {}
         for base in reversed(cls.__mro__):
             for name, member in base.__dict__.items():
                 if isinstance(member, Item):
@@ -211,12 +189,14 @@ class Container(Item[V]):
 
         cls.__container_children_items__ = children
 
-    def _update_children_view(self, view) -> None:
+    def _update_view(self, view) -> bool:
+        self._view = view
         for child in self._children:
-            child._view = view
-            if getattr(child, '__discord_ui_update_view__', False):
-                # if the item is an action row which child's view can be updated, then update it
-                child._update_children_view(view)  # type: ignore
+            child._update_view(view)
+        return True
+
+    def _has_children(self):
+        return True
 
     @property
     def children(self) -> List[Item[V]]:
@@ -254,15 +234,7 @@ class Container(Item[V]):
 
     def to_components(self) -> List[Dict[str, Any]]:
         components = []
-
-        def key(item: Item) -> int:
-            if item._rendered_row is not None:
-                return item._rendered_row
-            if item._row is not None:
-                return item._row
-            return sys.maxsize
-
-        for i in sorted(self._children, key=key):
+        for i in self._children:
             components.append(i.to_component_dict())
         return components
 
@@ -295,7 +267,7 @@ class Container(Item[V]):
 
     def walk_children(self) -> Generator[Item[V], None, None]:
         """An iterator that recursively walks through all the children of this container
-        and it's children, if applicable.
+        and its children, if applicable.
 
         Yields
         ------
@@ -306,8 +278,7 @@ class Container(Item[V]):
         for child in self.children:
             yield child
 
-            if getattr(child, '__discord_ui_update_view__', False):
-                # if it has this attribute then it can contain children
+            if child._has_children():
                 yield from child.walk_children()  # type: ignore
 
     def add_item(self, item: Item[Any]) -> Self:
@@ -330,18 +301,13 @@ class Container(Item[V]):
             raise TypeError(f'expected Item not {item.__class__.__name__}')
 
         self._children.append(item)
-        is_layout_view = self._view and getattr(self._view, '__discord_ui_layout_view__', False)
-
-        if getattr(item, '__discord_ui_update_view__', False):
-            item._update_children_view(self.view)  # type: ignore
-
-            if is_layout_view:
-                self._view._total_children += sum(1 for _ in item.walk_children())  # type: ignore
-        elif is_layout_view:
-            self._view._total_children += 1  # type: ignore
-
-        item._view = self.view
+        item._update_view(self.view)
         item._parent = self
+
+        if item._has_children() and self._view:
+            self._view._total_children += len(tuple(item.walk_children()))  # type: ignore
+        elif self._view:
+            self._view._total_children += 1
         return self
 
     def remove_item(self, item: Item[Any]) -> Self:
@@ -352,8 +318,8 @@ class Container(Item[V]):
 
         Parameters
         ----------
-        item: :class:`TextDisplay`
-            The item to remove from the section.
+        item: :class:`Item`
+            The item to remove from the container.
         """
 
         try:
@@ -361,14 +327,14 @@ class Container(Item[V]):
         except ValueError:
             pass
         else:
-            if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
-                if getattr(item, '__discord_ui_update_view__', False):
+            if self._view and self._view._is_layout():
+                if item._has_children():
                     self._view._total_children -= len(tuple(item.walk_children()))  # type: ignore
                 else:
                     self._view._total_children -= 1
         return self
 
-    def get_item(self, id: int, /) -> Optional[Item[V]]:
+    def find_item(self, id: int, /) -> Optional[Item[V]]:
         """Gets an item with :attr:`Item.id` set as ``id``, or ``None`` if
         not found.
 
@@ -395,7 +361,7 @@ class Container(Item[V]):
         chaining.
         """
 
-        if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
-            self._view._total_children -= sum(1 for _ in self.walk_children())
+        if self._view and self._view._is_layout():
+            self._view._total_children -= len(tuple(self.walk_children()))
         self._children.clear()
         return self

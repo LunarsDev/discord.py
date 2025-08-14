@@ -36,6 +36,7 @@ from typing import (
     Optional,
     Sequence,
     TYPE_CHECKING,
+    Set,
     Tuple,
     Type,
     Union,
@@ -48,7 +49,6 @@ import logging
 import sys
 import time
 import os
-import copy
 
 from .item import Item, ItemCallbackType
 from .select import Select
@@ -56,9 +56,6 @@ from .dynamic import DynamicItem
 from ..components import (
     Component,
     ActionRow as ActionRowComponent,
-    MediaGalleryItem,
-    SelectDefaultValue,
-    UnfurledMediaItem,
     _component_factory,
     Button as ButtonComponent,
     SelectMenu as SelectComponent,
@@ -68,12 +65,10 @@ from ..components import (
     FileComponent,
     SeparatorComponent,
     ThumbnailComponent,
-    SelectOption,
     Container as ContainerComponent,
+    LabelComponent,
 )
-from ..utils import get as _utils_get, _get_as_snowflake, find as _utils_find
-from ..enums import SeparatorSpacing, TextStyle, try_enum, ButtonStyle
-from ..emoji import PartialEmoji
+from ..utils import get as _utils_get, find as _utils_find
 
 # fmt: off
 __all__ = (
@@ -94,7 +89,7 @@ if TYPE_CHECKING:
     from ..state import ConnectionState
     from .modal import Modal
 
-    ItemLike = Union[ItemCallbackType[Any], Item[Any]]
+    ItemLike = Union[ItemCallbackType[Any, Any], Item[Any]]
 
 
 _log = logging.getLogger(__name__)
@@ -104,6 +99,11 @@ def _walk_all_components(components: List[Component]) -> Iterator[Component]:
     for item in components:
         if isinstance(item, ActionRowComponent):
             yield from item.children
+        elif isinstance(item, ContainerComponent):
+            yield from _walk_all_components(item.children)
+        elif isinstance(item, SectionComponent):
+            yield from item.children
+            yield item.accessory
         else:
             yield item
 
@@ -149,140 +149,12 @@ def _component_to_item(component: Component, parent: Optional[Item] = None) -> I
         from .container import Container
 
         item = Container.from_component(component)
+    elif isinstance(component, LabelComponent):
+        from .label import Label
+
+        item = Label.from_component(component)
     else:
         item = Item.from_component(component)
-
-    item._parent = parent
-    return item
-
-
-def _component_data_to_item(data: ComponentPayload, parent: Optional[Item] = None) -> Item:
-    if data['type'] == 1:
-        from .action_row import ActionRow
-
-        item = ActionRow(
-            *(_component_data_to_item(c) for c in data['components']),
-            id=data.get('id'),
-        )
-    elif data['type'] == 2:
-        from .button import Button
-
-        emoji = data.get('emoji')
-
-        item = Button(
-            style=try_enum(ButtonStyle, data['style']),
-            custom_id=data.get('custom_id'),
-            url=data.get('url'),
-            disabled=data.get('disabled', False),
-            emoji=PartialEmoji.from_dict(emoji) if emoji else None,
-            label=data.get('label'),
-            sku_id=_get_as_snowflake(data, 'sku_id'),
-        )
-    elif data['type'] == 3:
-        from .select import Select
-
-        item = Select(
-            custom_id=data['custom_id'],
-            placeholder=data.get('placeholder'),
-            min_values=data.get('min_values', 1),
-            max_values=data.get('max_values', 1),
-            disabled=data.get('disabled', False),
-            id=data.get('id'),
-            options=[SelectOption.from_dict(o) for o in data.get('options', [])],
-        )
-    elif data['type'] == 4:
-        from .text_input import TextInput
-
-        item = TextInput(
-            label=data['label'],
-            style=try_enum(TextStyle, data['style']),
-            custom_id=data['custom_id'],
-            placeholder=data.get('placeholder'),
-            default=data.get('value'),
-            required=data.get('required', True),
-            min_length=data.get('min_length'),
-            max_length=data.get('max_length'),
-            id=data.get('id'),
-        )
-    elif data['type'] in (5, 6, 7, 8):
-        from .select import (
-            UserSelect,
-            RoleSelect,
-            MentionableSelect,
-            ChannelSelect,
-        )
-
-        cls_map: Dict[int, Type[Union[UserSelect, RoleSelect, MentionableSelect, ChannelSelect]]] = {
-            5: UserSelect,
-            6: RoleSelect,
-            7: MentionableSelect,
-            8: ChannelSelect,
-        }
-
-        item = cls_map[data['type']](
-            custom_id=data['custom_id'],  # type: ignore # will always be present in this point
-            placeholder=data.get('placeholder'),
-            min_values=data.get('min_values', 1),
-            max_values=data.get('max_values', 1),
-            disabled=data.get('disabled', False),
-            default_values=[SelectDefaultValue.from_dict(v) for v in data.get('default_values', [])],
-            id=data.get('id'),
-        )
-    elif data['type'] == 9:
-        from .section import Section
-
-        item = Section(
-            *(_component_data_to_item(c) for c in data['components']),
-            accessory=_component_data_to_item(data['accessory']),
-            id=data.get('id'),
-        )
-    elif data['type'] == 10:
-        from .text_display import TextDisplay
-
-        item = TextDisplay(data['content'], id=data.get('id'))
-    elif data['type'] == 11:
-        from .thumbnail import Thumbnail
-
-        item = Thumbnail(
-            UnfurledMediaItem._from_data(data['media'], None),
-            description=data.get('description'),
-            spoiler=data.get('spoiler', False),
-            id=data.get('id'),
-        )
-    elif data['type'] == 12:
-        from .media_gallery import MediaGallery
-
-        item = MediaGallery(
-            *(MediaGalleryItem._from_data(m, None) for m in data['items']),
-            id=data.get('id'),
-        )
-    elif data['type'] == 13:
-        from .file import File
-
-        item = File(
-            UnfurledMediaItem._from_data(data['file'], None),
-            spoiler=data.get('spoiler', False),
-            id=data.get('id'),
-        )
-    elif data['type'] == 14:
-        from .separator import Separator
-
-        item = Separator(
-            visible=data.get('divider', True),
-            spacing=try_enum(SeparatorSpacing, data.get('spacing', 1)),
-            id=data.get('id'),
-        )
-    elif data['type'] == 17:
-        from .container import Container
-
-        item = Container(
-            *(_component_data_to_item(c) for c in data['components']),
-            accent_colour=data.get('accent_color'),
-            spoiler=data.get('spoiler', False),
-            id=data.get('type'),
-        )
-    else:
-        raise ValueError(f'invalid item with type {data["type"]} provided')
 
     item._parent = parent
     return item
@@ -335,8 +207,8 @@ class _ViewWeights:
 class _ViewCallback:
     __slots__ = ('view', 'callback', 'item')
 
-    def __init__(self, callback: ItemCallbackType[Any], view: BaseView, item: Item[BaseView]) -> None:
-        self.callback: ItemCallbackType[Any] = callback
+    def __init__(self, callback: ItemCallbackType[Any, Any], view: BaseView, item: Item[BaseView]) -> None:
+        self.callback: ItemCallbackType[Any, Any] = callback
         self.view: BaseView = view
         self.item: Item[BaseView] = item
 
@@ -358,9 +230,9 @@ class BaseView:
         self.__timeout_expiry: Optional[float] = None
         self.__timeout_task: Optional[asyncio.Task[None]] = None
         self.__stopped: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
-        self._total_children: int = sum(1 for _ in self.walk_children())
+        self._total_children: int = len(tuple(self.walk_children()))
 
-    def _is_v2(self) -> bool:
+    def _is_layout(self) -> bool:
         return False
 
     def __repr__(self) -> str:
@@ -372,14 +244,12 @@ class BaseView:
 
         for name, raw in self.__view_children_items__.items():
             if isinstance(raw, Item):
-                item = copy.deepcopy(raw)
+                item = raw.copy()
                 setattr(self, name, item)
-                item._view = self
+                item._update_view(self)
                 parent = getattr(item, '__discord_ui_parent__', None)
                 if parent and parent._view is None:
                     parent._view = self
-                if getattr(item, '__discord_ui_update_view__', False):
-                    item._update_children_view(self)  # type: ignore
                 children.append(item)
                 parents[raw] = item
             else:
@@ -455,7 +325,7 @@ class BaseView:
         return self._children.copy()
 
     @classmethod
-    def from_message(cls, message: Message, /, *, timeout: Optional[float] = 180.0) -> Any:
+    def from_message(cls, message: Message, /, *, timeout: Optional[float] = 180.0) -> Union[View, LayoutView]:
         """Converts a message's components into a :class:`View`.
 
         The :attr:`.Message.components` of a message are read-only
@@ -463,14 +333,9 @@ class BaseView:
         In order to modify and edit message components they must be
         converted into a :class:`View` or :class:`LayoutView` first.
 
-        If the message has any v2 component, then you must use
+        If the message has any v2 components, then you must use
         :class:`LayoutView` in order for them to be converted into
-        their respective items.
-
-        This method should be called on the respective class (or subclass), so
-        if you want to convert v2 items, you should call :meth:`LayoutView.from_message`,
-        or the same method from any subclass of it; and not :meth:`View.from_message`, or the
-        same method from any subclass of it.
+        their respective items. :class:`View` does not support v2 components.
 
         Parameters
         -----------
@@ -485,19 +350,26 @@ class BaseView:
             The converted view. This will always return one of :class:`View` or
             :class:`LayoutView`, and not one of its subclasses.
         """
-        cls = cls._to_minimal_cls()
-        view = cls(timeout=timeout)
+
+        if issubclass(cls, View):
+            view_cls = View
+        elif issubclass(cls, LayoutView):
+            view_cls = LayoutView
+        else:
+            raise TypeError('unreachable exception')
+
+        view = view_cls(timeout=timeout)
         row = 0
 
         for component in message.components:
-            if not view._is_v2() and isinstance(component, ActionRowComponent):
+            if not view._is_layout() and isinstance(component, ActionRowComponent):
                 for child in component.children:
                     item = _component_to_item(child)
                     item.row = row
                     # this error should never be raised, because ActionRows can only
                     # contain items that View accepts, but check anyways
                     if item._is_v2():
-                        raise RuntimeError(f'{item.__class__.__name__} cannot be added to {view.__class__.__name__}')
+                        raise ValueError(f'{item.__class__.__name__} cannot be added to {view.__class__.__name__}')
                     view.add_item(item)
                     row += 1
                 continue
@@ -505,8 +377,8 @@ class BaseView:
             item = _component_to_item(component)
             item.row = row
 
-            if item._is_v2() and not view._is_v2():
-                raise RuntimeError(f'{item.__class__.__name__} cannot be added to {view.__class__.__name__}')
+            if item._is_v2() and not view._is_layout():
+                raise ValueError(f'{item.__class__.__name__} cannot be added to {view.__class__.__name__}')
 
             view.add_item(item)
             row += 1
@@ -536,18 +408,19 @@ class BaseView:
 
         if not isinstance(item, Item):
             raise TypeError(f'expected Item not {item.__class__.__name__}')
-        if item._is_v2() and not self._is_v2():
+
+        if item._is_v2() and not self._is_layout():
             raise ValueError('v2 items cannot be added to this view')
 
-        item._view = self
+        item._update_view(self)
         added = 1
 
-        if getattr(item, '__discord_ui_update_view__', False):
-            item._update_children_view(self)  # type: ignore
+        if item._has_children():
             added += len(tuple(item.walk_children()))  # type: ignore
 
-        if self._is_v2() and self._total_children + added > 40:
+        if self._is_layout() and self._total_children + added > 40:
             raise ValueError('maximum number of children exceeded')
+
         self._total_children += added
         self._children.append(item)
         return self
@@ -570,7 +443,7 @@ class BaseView:
             pass
         else:
             removed = 1
-            if getattr(item, '__discord_ui_update_view__', False):
+            if item._has_children():
                 removed += len(tuple(item.walk_children()))  # type: ignore
 
             if self._total_children - removed < 0:
@@ -590,7 +463,7 @@ class BaseView:
         self._total_children = 0
         return self
 
-    def get_item(self, id: int, /) -> Optional[Item[Self]]:
+    def find_item(self, id: int, /) -> Optional[Item[Self]]:
         """Gets an item with :attr:`Item.id` set as ``id``, or ``None`` if
         not found.
 
@@ -701,17 +574,17 @@ class BaseView:
         self.__stopped.set_result(True)
         asyncio.create_task(self.on_timeout(), name=f'discord-ui-view-timeout-{self.id}')
 
-    def _dispatch_item(self, item: Item, interaction: Interaction):
+    def _dispatch_item(self, item: Item, interaction: Interaction) -> Optional[asyncio.Task[None]]:
         if self.__stopped.done():
             return
 
-        asyncio.create_task(self._scheduled_task(item, interaction), name=f'discord-ui-view-dispatch-{self.id}')
+        return asyncio.create_task(self._scheduled_task(item, interaction), name=f'discord-ui-view-dispatch-{self.id}')
 
     def _refresh(self, components: List[Component]) -> None:
         # fmt: off
         old_state: Dict[str, Item[Any]] = {
             item.custom_id: item  # type: ignore
-            for item in self._children
+            for item in self.walk_children()
             if item.is_dispatchable()
         }
         # fmt: on
@@ -780,7 +653,7 @@ class BaseView:
 
     def walk_children(self) -> Generator[Item[Any], None, None]:
         """An iterator that recursively walks through all the children of this view
-        and it's children, if applicable.
+        and its children, if applicable.
 
         Yields
         ------
@@ -791,54 +664,8 @@ class BaseView:
         for child in self.children:
             yield child
 
-            if getattr(child, '__discord_ui_update_view__', False):
-                # if it has this attribute then it can contain children
+            if child._has_children():
                 yield from child.walk_children()  # type: ignore
-
-    @classmethod
-    def _to_minimal_cls(cls) -> Type[Union[View, LayoutView]]:
-        if issubclass(cls, View):
-            return View
-        elif issubclass(cls, LayoutView):
-            return LayoutView
-        raise RuntimeError
-
-    @classmethod
-    def from_dict(cls, data: List[ComponentPayload], *, timeout: Optional[float] = 180.0) -> Any:
-        r"""Converts a :class:`list` of :class:`dict`\s to a :class:`View` or :class:`LayoutView`,
-        provided as in the format that Discord expects it to be in.
-
-        You can find out about this format in the :ddocs:`official Discord documentation <components/reference#anatomy-of-a-component>`.
-
-        This method should be called on the respective class (or subclass), so if you
-        want to convert v2 items, you should call :meth:`LayoutView.from_dict`, or the same
-        method from any subclass of it; and not :meth:`View.from_message`, or the same
-        method from any subclass of it.
-
-        Parameters
-        ----------
-        data: List[:class:`dict`]
-            The array of dictionaries to convert into a LayoutView
-        timeout: Optional[:class:`float`]
-            The timeout of the converted view.
-
-        Returns
-        -------
-        Union[:class:`View`, :class:`LayoutView`]
-            The converted view. This will always return one of :class:`View` or
-            :class:`LayoutView`, and not one of its subclasses.
-        """
-        cls = cls._to_minimal_cls()
-        self = cls(timeout=timeout)
-
-        for raw in data:
-            item = _component_data_to_item(raw)
-
-            if item._is_v2() and not self._is_v2():
-                continue
-
-            self.add_item(item)
-        return self
 
 
 class View(BaseView):
@@ -876,7 +703,7 @@ class View(BaseView):
                 if hasattr(member, '__discord_ui_model_type__'):
                     children[name] = member
                 elif isinstance(member, Item) and member._is_v2():
-                    raise RuntimeError(f'{name} cannot be added to this View')
+                    raise ValueError(f'{name} cannot be added to this View')
 
         if len(children) > 25:
             raise TypeError('View cannot have more than 25 children')
@@ -886,10 +713,6 @@ class View(BaseView):
     def __init__(self, *, timeout: Optional[float] = 180.0):
         super().__init__(timeout=timeout)
         self.__weights = _ViewWeights(self._children)
-
-    @property
-    def width(self):
-        return 5
 
     def to_components(self) -> List[Dict[str, Any]]:
         def key(item: Item) -> int:
@@ -956,8 +779,6 @@ class LayoutView(BaseView):
         If ``None`` then there is no timeout.
     """
 
-    __discord_ui_layout_view__: ClassVar[bool] = True
-
     if TYPE_CHECKING:
 
         @classmethod
@@ -978,11 +799,14 @@ class LayoutView(BaseView):
         super().__init_subclass__()
 
         children: Dict[str, ItemLike] = {}
-        callback_children: Dict[str, ItemCallbackType[Any]] = {}
+        callback_children: Dict[str, ItemCallbackType[Any, Any]] = {}
 
         for base in reversed(cls.__mro__):
             for name, member in base.__dict__.items():
                 if isinstance(member, Item):
+                    if member._parent is not None:
+                        continue
+
                     member._rendered_row = member._row
                     children[name] = member
                 elif hasattr(member, '__discord_ui_model_type__') and getattr(member, '__discord_ui_parent__', None):
@@ -991,23 +815,12 @@ class LayoutView(BaseView):
         children.update(callback_children)
         cls.__view_children_items__ = children
 
-    def _is_v2(self) -> bool:
+    def _is_layout(self) -> bool:
         return True
 
     def to_components(self):
         components: List[Dict[str, Any]] = []
-
-        # sorted by row, which in LayoutView indicates the position of the component in the
-        # payload instead of in which ActionRow it should be placed on.
-
-        def key(item: Item) -> int:
-            if item._rendered_row is not None:
-                return item._rendered_row
-            if item._row is not None:
-                return item._row
-            return sys.maxsize
-
-        for i in sorted(self._children, key=key):
+        for i in self._children:
             components.append(i.to_component_dict())
 
         return components
@@ -1030,6 +843,7 @@ class ViewStore:
         # component_type is the key
         self._dynamic_items: Dict[re.Pattern[str], Type[DynamicItem[Item[Any]]]] = {}
         self._state: ConnectionState = state
+        self.__tasks: Set[asyncio.Task[None]] = set()
 
     @property
     def persistent_views(self) -> Sequence[BaseView]:
@@ -1042,6 +856,10 @@ class ViewStore:
         }
         # fmt: on
         return list(views.values())
+
+    def add_task(self, task: asyncio.Task[None]) -> None:
+        self.__tasks.add(task)
+        task.add_done_callback(self.__tasks.discard)
 
     def add_dynamic_items(self, *items: Type[DynamicItem[Item[Any]]]) -> None:
         for item in items:
@@ -1128,15 +946,7 @@ class ViewStore:
         try:
             child_index = parent._children.index(base_item)  # type: ignore
         except ValueError:
-            # handle cases in which the item is a section accessory
-            if getattr(base_item._parent, '__discord_ui_section__', False):
-                if (
-                    base_item._parent.accessory.type.value == component_type  # type: ignore
-                    and getattr(base_item._parent.accessory, 'custom_id', None) == custom_id  # type: ignore
-                ):
-                    base_item._parent.accessory = item  # type: ignore
-            else:
-                return
+            return
         else:
             parent._children[child_index] = item  # type: ignore
 
@@ -1161,9 +971,11 @@ class ViewStore:
         for pattern, item in self._dynamic_items.items():
             match = pattern.fullmatch(custom_id)
             if match is not None:
-                asyncio.create_task(
-                    self.schedule_dynamic_item_call(component_type, item, interaction, custom_id, match),
-                    name=f'discord-ui-dynamic-item-{item.__name__}-{custom_id}',
+                self.add_task(
+                    asyncio.create_task(
+                        self.schedule_dynamic_item_call(component_type, item, interaction, custom_id, match),
+                        name=f'discord-ui-dynamic-item-{item.__name__}-{custom_id}',
+                    )
                 )
 
     def dispatch_view(self, component_type: int, custom_id: str, interaction: Interaction) -> None:
@@ -1210,7 +1022,9 @@ class ViewStore:
             return
 
         # Note, at this point the View is *not* None
-        item.view._dispatch_item(item, interaction)  # type: ignore
+        task = item.view._dispatch_item(item, interaction)  # type: ignore
+        if task is not None:
+            self.add_task(task)
 
     def dispatch_modal(
         self,
@@ -1223,7 +1037,7 @@ class ViewStore:
             _log.debug("Modal interaction referencing unknown custom_id %s. Discarding", custom_id)
             return
 
-        modal._dispatch_submit(interaction, components)
+        self.add_task(modal._dispatch_submit(interaction, components))
 
     def remove_interaction_mapping(self, interaction_id: int) -> None:
         # This is called before re-adding the view
