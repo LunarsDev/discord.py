@@ -41,7 +41,7 @@ __all__ = ('Thumbnail',)
 
 
 class Thumbnail(Item[V]):
-    """Represents a UI Thumbnail.
+    """Represents a UI Thumbnail. This currently can only be used as a :class:`Section`\'s accessory.
 
     .. versionadded:: 2.6
 
@@ -55,16 +55,22 @@ class Thumbnail(Item[V]):
         The description of this thumbnail. Up to 256 characters. Defaults to ``None``.
     spoiler: :class:`bool`
         Whether to flag this thumbnail as a spoiler. Defaults to ``False``.
-    row: Optional[:class:`int`]
-        The relative row this thumbnail belongs to. By default
-        items are arranged automatically into those rows. If you'd
-        like to control the relative positioning of the row then
-        passing an index is advised. For example, row=1 will show
-        up before row=2. Defaults to ``None``, which is automatic
-        ordering. The row number must be between 0 and 39 (i.e. zero indexed)
     id: Optional[:class:`int`]
         The ID of this component. This must be unique across the view.
     """
+
+    __slots__ = (
+        '_media',
+        'description',
+        'spoiler',
+    )
+    __item_repr_attributes__ = (
+        'media',
+        'description',
+        'spoiler',
+        'row',
+        'id',
+    )
 
     def __init__(
         self,
@@ -72,21 +78,31 @@ class Thumbnail(Item[V]):
         *,
         description: Optional[str] = None,
         spoiler: bool = False,
-        row: Optional[int] = None,
         id: Optional[int] = None,
     ) -> None:
         super().__init__()
-
-        self.media: UnfurledMediaItem = UnfurledMediaItem(media) if isinstance(media, str) else media
+        self._media: UnfurledMediaItem = UnfurledMediaItem(media) if isinstance(media, str) else media
         self.description: Optional[str] = description
         self.spoiler: bool = spoiler
-
-        self.row = row
         self.id = id
 
     @property
     def width(self):
         return 5
+
+    @property
+    def media(self) -> UnfurledMediaItem:
+        """:class:`discord.UnfurledMediaItem`: This thumbnail unfurled media data."""
+        return self._media
+
+    @media.setter
+    def media(self, value: Union[str, UnfurledMediaItem]) -> None:
+        if isinstance(value, str):
+            self._media = UnfurledMediaItem(value)
+        elif isinstance(value, UnfurledMediaItem):
+            self._media = value
+        else:
+            raise TypeError(f'expected a str or UnfurledMediaItem, not {value.__class__.__name__!r}')
 
     @property
     def type(self) -> Literal[ComponentType.thumbnail]:

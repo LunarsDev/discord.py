@@ -113,6 +113,15 @@ TextInput
     :members:
     :inherited-members:
 
+LabelComponent
+~~~~~~~~~~~~~~~~
+
+.. attributetable:: LabelComponent
+
+.. autoclass:: LabelComponent()
+    :members:
+    :inherited-members:
+
 
 SectionComponent
 ~~~~~~~~~~~~~~~~
@@ -408,29 +417,49 @@ Enumerations
 
         Represents a component which holds different components in a section.
 
+        .. versionadded:: 2.6
+
     .. attribute:: text_display
 
         Represents a text display component.
+
+        .. versionadded:: 2.6
 
     .. attribute:: thumbnail
 
         Represents a thumbnail component.
 
+        .. versionadded:: 2.6
+
     .. attribute:: media_gallery
 
         Represents a media gallery component.
+
+        .. versionadded:: 2.6
 
     .. attribute:: file
 
         Represents a file component.
 
+        .. versionadded:: 2.6
+
     .. attribute:: separator
 
         Represents a separator component.
 
+        .. versionadded:: 2.6
+
     .. attribute:: container
 
         Represents a component which holds different components in a container.
+
+        .. versionadded:: 2.6
+
+    .. attribute:: label
+
+        Represents a label container component, usually in a modal.
+
+        .. versionadded:: 2.6
 
 .. class:: ButtonStyle
 
@@ -566,7 +595,7 @@ Enumerations
 
         The permission is for a user.
 
-.. class:: SeparatorSize
+.. class:: SeparatorSpacing
 
     The separator's size type.
 
@@ -596,21 +625,21 @@ View
     :members:
     :inherited-members:
 
-Modal
-~~~~~~
-
-.. attributetable:: discord.ui.Modal
-
-.. autoclass:: discord.ui.Modal
-    :members:
-    :inherited-members:
-
 LayoutView
 ~~~~~~~~~~
 
 .. attributetable:: discord.ui.LayoutView
 
 .. autoclass:: discord.ui.LayoutView
+    :members:
+    :inherited-members:
+
+Modal
+~~~~~~
+
+.. attributetable:: discord.ui.Modal
+
+.. autoclass:: discord.ui.Modal
     :members:
     :inherited-members:
 
@@ -725,6 +754,15 @@ File
 .. attributetable:: discord.ui.File
 
 .. autoclass:: discord.ui.File
+    :members:
+    :inherited-members:
+
+Label
+~~~~~~
+
+.. attributetable:: discord.ui.Label
+
+.. autoclass:: discord.ui.Label
     :members:
     :inherited-members:
 

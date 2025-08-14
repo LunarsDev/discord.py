@@ -23,13 +23,14 @@ DEALINGS IN THE SOFTWARE.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Literal, Optional, TypeVar
+from typing import TYPE_CHECKING, List, Literal, Optional, TypeVar, Union
 
 from .item import Item
 from ..enums import ComponentType
 from ..components import (
     MediaGalleryItem,
     MediaGalleryComponent,
+    UnfurledMediaItem,
 )
 
 if TYPE_CHECKING:
@@ -43,9 +44,9 @@ __all__ = ('MediaGallery',)
 
 
 class MediaGallery(Item[V]):
-    """Represents a UI media gallery.
+    r"""Represents a UI media gallery.
 
-    Can contain up to 10 :class:`.MediaGalleryItem` 's.
+    Can contain up to 10 :class:`.MediaGalleryItem`\s.
 
     This is a top-level layout component that can only be used on :class:`LayoutView`.
 
@@ -53,23 +54,20 @@ class MediaGallery(Item[V]):
 
     Parameters
     ----------
-    *items: :class:`.MediaGalleryItem`
+    \*items: :class:`.MediaGalleryItem`
         The initial items of this gallery.
-    row: Optional[:class:`int`]
-        The relative row this media gallery belongs to. By default
-        items are arranged automatically into those rows. If you'd
-        like to control the relative positioning of the row then
-        passing an index is advised. For example, row=1 will show
-        up before row=2. Defaults to ``None``, which is automatic
-        ordering. The row number must be between 0 and 39 (i.e. zero indexed)
     id: Optional[:class:`int`]
         The ID of this component. This must be unique across the view.
     """
 
+    __item_repr_attributes__ = (
+        'items',
+        'id',
+    )
+
     def __init__(
         self,
         *items: MediaGalleryItem,
-        row: Optional[int] = None,
         id: Optional[int] = None,
     ) -> None:
         super().__init__()
@@ -79,8 +77,8 @@ class MediaGallery(Item[V]):
             id=id,
         )
 
-        self.row = row
-        self.id = id
+    def __repr__(self) -> str:
+        return f'<{self.__class__.__name__} items={len(self._underlying.items)}>'
 
     @property
     def items(self) -> List[MediaGalleryItem]:
@@ -94,14 +92,60 @@ class MediaGallery(Item[V]):
 
         self._underlying.items = value
 
+    @property
+    def id(self) -> Optional[int]:
+        """Optional[:class:`int`]: The ID of this component."""
+        return self._underlying.id
+
+    @id.setter
+    def id(self, value: Optional[int]) -> None:
+        self._underlying.id = value
+
     def to_component_dict(self):
         return self._underlying.to_dict()
 
     def _is_v2(self) -> bool:
         return True
 
-    def add_item(self, item: MediaGalleryItem) -> Self:
+    def add_item(
+        self,
+        *,
+        media: Union[str, UnfurledMediaItem],
+        description: Optional[str] = None,
+        spoiler: bool = False,
+    ) -> Self:
         """Adds an item to this gallery.
+
+        This function returns the class instance to allow for fluent-style
+        chaining.
+
+        Parameters
+        ----------
+        media: Union[:class:`str`, :class:`.UnfurledMediaItem`]
+            The media item data. This can be a string representing a local
+            file uploaded as an attachment in the message, which can be accessed
+            using the ``attachment://<filename>`` format, or an arbitrary url.
+        description: Optional[:class:`str`]
+            The description to show within this item. Up to 256 characters. Defaults
+            to ``None``.
+        spoiler: :class:`bool`
+            Whether this item should be flagged as a spoiler. Defaults to ``False``.
+
+        Raises
+        ------
+        ValueError
+            Maximum number of items has been exceeded (10).
+        """
+
+        if len(self._underlying.items) >= 10:
+            raise ValueError('maximum number of items has been exceeded')
+
+        item = MediaGalleryItem(media, description=description, spoiler=spoiler)
+        self._underlying.items.append(item)
+        return self
+
+    def append_item(self, item: MediaGalleryItem) -> Self:
+        """Appends an item to this gallery.
 
         This function returns the class instance to allow for fluent-style
         chaining.
@@ -123,9 +167,53 @@ class MediaGallery(Item[V]):
             raise ValueError('maximum number of items has been exceeded')
 
         if not isinstance(item, MediaGalleryItem):
-            raise TypeError(f'expected MediaGalleryItem not {item.__class__.__name__}')
+            raise TypeError(f'expected MediaGalleryItem, not {item.__class__.__name__!r}')
 
         self._underlying.items.append(item)
+        return self
+
+    def insert_item_at(
+        self,
+        index: int,
+        *,
+        media: Union[str, UnfurledMediaItem],
+        description: Optional[str] = None,
+        spoiler: bool = False,
+    ) -> Self:
+        """Inserts an item before a specified index to the media gallery.
+
+        This function returns the class instance to allow for fluent-style
+        chaining.
+
+        Parameters
+        ----------
+        index: :class:`int`
+            The index of where to insert the field.
+        media: Union[:class:`str`, :class:`.UnfurledMediaItem`]
+            The media item data. This can be a string representing a local
+            file uploaded as an attachment in the message, which can be accessed
+            using the ``attachment://<filename>`` format, or an arbitrary url.
+        description: Optional[:class:`str`]
+            The description to show within this item. Up to 256 characters. Defaults
+            to ``None``.
+        spoiler: :class:`bool`
+            Whether this item should be flagged as a spoiler. Defaults to ``False``.
+
+        Raises
+        ------
+        ValueError
+            Maximum number of items has been exceeded (10).
+        """
+
+        if len(self._underlying.items) >= 10:
+            raise ValueError('maximum number of items has been exceeded')
+
+        item = MediaGalleryItem(
+            media,
+            description=description,
+            spoiler=spoiler,
+        )
+        self._underlying.items.insert(index, item)
         return self
 
     def remove_item(self, item: MediaGalleryItem) -> Self:
@@ -144,23 +232,6 @@ class MediaGallery(Item[V]):
             self._underlying.items.remove(item)
         except ValueError:
             pass
-        return self
-
-    def insert_item_at(self, index: int, item: MediaGalleryItem) -> Self:
-        """Inserts an item before a specified index to the gallery.
-
-        This function returns the class instance to allow for fluent-style
-        chaining.
-
-        Parameters
-        ----------
-        index: :class:`int`
-            The index of where to insert the item.
-        item: :class:`.MediaGalleryItem`
-            The item to insert.
-        """
-
-        self._underlying.items.insert(index, item)
         return self
 
     def clear_items(self) -> Self:

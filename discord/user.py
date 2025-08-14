@@ -29,9 +29,10 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 import discord.abc
 from .asset import Asset
 from .colour import Colour
-from .enums import DefaultAvatar, PremiumType, try_enum
+from .enums import DefaultAvatar
 from .flags import PublicUserFlags
 from .utils import snowflake_time, _bytes_to_base64_data, MISSING, _get_as_snowflake
+from .primary_guild import PrimaryGuild
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -43,7 +44,12 @@ if TYPE_CHECKING:
     from .message import Message
     from .state import ConnectionState
     from .types.channel import DMChannel as DMChannelPayload
-    from .types.user import PartialUser as PartialUserPayload, User as UserPayload, AvatarDecorationData
+    from .types.user import (
+        PartialUser as PartialUserPayload,
+        User as UserPayload,
+        AvatarDecorationData,
+        PrimaryGuild as PrimaryGuildPayload,
+    )
 
 
 __all__ = (
@@ -71,7 +77,7 @@ class BaseUser(_UserTag):
         '_public_flags',
         '_state',
         '_avatar_decoration_data',
-        '_premium_type',
+        '_primary_guild',
     )
 
     if TYPE_CHECKING:
@@ -81,13 +87,13 @@ class BaseUser(_UserTag):
         global_name: Optional[str]
         bot: bool
         system: bool
-        _premium_type: Optional[int]
         _state: ConnectionState
         _avatar: Optional[str]
         _banner: Optional[str]
         _accent_colour: Optional[int]
         _public_flags: int
         _avatar_decoration_data: Optional[AvatarDecorationData]
+        _primary_guild: Optional[PrimaryGuildPayload]
 
     def __init__(self, *, state: ConnectionState, data: Union[UserPayload, PartialUserPayload]) -> None:
         self._state = state
@@ -125,7 +131,7 @@ class BaseUser(_UserTag):
         self.bot = data.get('bot', False)
         self.system = data.get('system', False)
         self._avatar_decoration_data = data.get('avatar_decoration_data')
-        self._premium_type = data.get('premium_type')
+        self._primary_guild = data.get('primary_guild', None)
 
     @classmethod
     def _copy(cls, user: Self) -> Self:
@@ -142,7 +148,7 @@ class BaseUser(_UserTag):
         self._state = user._state
         self._public_flags = user._public_flags
         self._avatar_decoration_data = user._avatar_decoration_data
-        self._premium_type = user._premium_type
+        self._primary_guild = user._primary_guild
 
         return self
 
@@ -154,7 +160,6 @@ class BaseUser(_UserTag):
             'discriminator': self.discriminator,
             'global_name': self.global_name,
             'bot': self.bot,
-            'premium_type': self._premium_type,
         }
 
     @property
@@ -309,6 +314,15 @@ class BaseUser(_UserTag):
         if self.global_name:
             return self.global_name
         return self.name
+
+    @property
+    def primary_guild(self) -> PrimaryGuild:
+        """:class:`PrimaryGuild`: Returns the user's primary guild.
+
+        .. versionadded:: 2.6"""
+        if self._primary_guild is not None:
+            return PrimaryGuild(state=self._state, data=self._primary_guild)
+        return PrimaryGuild._default(self._state)
 
     def mentioned_in(self, message: Message) -> bool:
         """Checks if the user is mentioned in the specified message.
@@ -552,23 +566,6 @@ class User(BaseUser, discord.abc.Messageable):
         .. versionadded:: 1.7
         """
         return [guild for guild in self._state._guilds.values() if guild.get_member(self.id)]
-    
-    @property
-    def premium_type(self) -> Optional[PremiumType]:
-        """Specifies the type of Nitro subscription on a given user.
-        
-        The API field that this uses may be removed in the future.
-
-        Returns
-        --------
-        :class:`PremiumType`
-            The type of premium subscription the user has.
-            :attr:`PremiumType.keyerror` if the field is not found.
-        """
-        if self._premium_type is None:
-            return PremiumType.keyerror
-
-        return try_enum(PremiumType, self._premium_type)
 
     async def create_dm(self) -> DMChannel:
         """|coro|
@@ -590,4 +587,3 @@ class User(BaseUser, discord.abc.Messageable):
         state = self._state
         data: DMChannelPayload = await state.http.start_private_message(self.id)
         return state.add_dm_channel(data)
-    

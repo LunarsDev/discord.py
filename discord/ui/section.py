@@ -23,7 +23,6 @@ DEALINGS IN THE SOFTWARE.
 """
 from __future__ import annotations
 
-import sys
 from typing import TYPE_CHECKING, Any, Dict, Generator, List, Literal, Optional, TypeVar, Union, ClassVar
 
 from .item import Item
@@ -43,31 +42,27 @@ __all__ = ('Section',)
 
 
 class Section(Item[V]):
-    """Represents a UI section.
+    r"""Represents a UI section.
 
-    This is a top-level layout component that can only be used on :class:`LayoutView`
+    This is a top-level layout component that can only be used on :class:`LayoutView`.
 
     .. versionadded:: 2.6
 
     Parameters
     ----------
-    *children: Union[:class:`str`, :class:`TextDisplay`]
+    \*children: Union[:class:`str`, :class:`TextDisplay`]
         The text displays of this section. Up to 3.
     accessory: :class:`Item`
         The section accessory.
-    row: Optional[:class:`int`]
-        The relative row this section belongs to. By default
-        items are arranged automatically into those rows. If you'd
-        like to control the relative positioning of the row then
-        passing an index is advised. For example, row=1 will show
-        up before row=2. Defaults to ``None``, which is automatic
-        ordering. The row number must be between 0 and 39 (i.e. zero indexed)
     id: Optional[:class:`int`]
         The ID of this component. This must be unique across the view.
     """
 
+    __item_repr_attributes__ = (
+        'accessory',
+        'id',
+    )
     __discord_ui_section__: ClassVar[bool] = True
-    __discord_ui_update_view__: ClassVar[bool] = True
 
     __slots__ = (
         '_children',
@@ -78,20 +73,21 @@ class Section(Item[V]):
         self,
         *children: Union[Item[V], str],
         accessory: Item[V],
-        row: Optional[int] = None,
         id: Optional[int] = None,
     ) -> None:
         super().__init__()
         self._children: List[Item[V]] = []
-        if children is not MISSING:
+        if children:
             if len(children) > 3:
                 raise ValueError('maximum number of children exceeded')
             self._children.extend(
                 [c if isinstance(c, Item) else TextDisplay(c) for c in children],
             )
         self.accessory: Item[V] = accessory
-        self.row = row
         self.id = id
+
+    def __repr__(self) -> str:
+        return f'<{self.__class__.__name__} children={len(self._children)}>'
 
     @property
     def type(self) -> Literal[ComponentType.section]:
@@ -109,19 +105,9 @@ class Section(Item[V]):
     def _is_v2(self) -> bool:
         return True
 
-    # Accessory can be a button, and thus it can have a callback so, maybe
-    # allow for section to be dispatchable and make the callback func
-    # be accessory component callback, only called if accessory is
-    # dispatchable?
-    def is_dispatchable(self) -> bool:
-        return self.accessory.is_dispatchable()
-
-    def is_persistent(self) -> bool:
-        return self.is_dispatchable() and self.accessory.is_persistent()
-
     def walk_children(self) -> Generator[Item[V], None, None]:
-        """An iterator that recursively walks through all the children of this section.
-        and it's children, if applicable.
+        """An iterator that recursively walks through all the children of this section
+        and its children, if applicable. This includes the `accessory`.
 
         Yields
         ------
@@ -133,8 +119,14 @@ class Section(Item[V]):
             yield child
         yield self.accessory
 
-    def _update_children_view(self, view) -> None:
+    def _update_view(self, view) -> None:
+        self._view = view
         self.accessory._view = view
+        for child in self._children:
+            child._view = view
+
+    def _has_children(self):
+        return True
 
     def add_item(self, item: Union[str, Item[Any]]) -> Self:
         """Adds an item to this section.
@@ -163,12 +155,12 @@ class Section(Item[V]):
             raise TypeError(f'expected Item or str not {item.__class__.__name__}')
 
         item = item if isinstance(item, Item) else TextDisplay(item)
-        item._view = self.view
+        item._update_view(self.view)
         item._parent = self
         self._children.append(item)
 
-        if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
-            self._view.__total_children += 1
+        if self._view:
+            self._view._total_children += 1
 
         return self
 
@@ -180,7 +172,7 @@ class Section(Item[V]):
 
         Parameters
         ----------
-        item: :class:`TextDisplay`
+        item: :class:`Item`
             The item to remove from the section.
         """
 
@@ -189,12 +181,12 @@ class Section(Item[V]):
         except ValueError:
             pass
         else:
-            if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
-                self._view.__total_children -= 1
+            if self._view:
+                self._view._total_children -= 1
 
         return self
 
-    def get_item_by_id(self, id: int, /) -> Optional[Item[V]]:
+    def find_item(self, id: int, /) -> Optional[Item[V]]:
         """Gets an item with :attr:`Item.id` set as ``id``, or ``None`` if
         not found.
 
@@ -212,7 +204,7 @@ class Section(Item[V]):
         Optional[:class:`Item`]
             The item found, or ``None``.
         """
-        return _utils_get(self._children, id=id)
+        return _utils_get(self.walk_children(), id=id)
 
     def clear_items(self) -> Self:
         """Removes all the items from the section.
@@ -220,32 +212,35 @@ class Section(Item[V]):
         This function returns the class instance to allow for fluent-style
         chaining.
         """
-        if self._view and getattr(self._view, '__discord_ui_layout_view__', False):
-            self._view.__total_children -= len(self._children) + 1  # the + 1 is the accessory
+        if self._view and self._view._is_layout():
+            self._view._total_children -= len(self._children)  # we don't count the accessory because it is required
 
         self._children.clear()
         return self
 
     @classmethod
     def from_component(cls, component: SectionComponent) -> Self:
-        from .view import _component_to_item  # >circular import<
+        from .view import _component_to_item
 
-        return cls(
-            *[_component_to_item(c) for c in component.components],
-            accessory=_component_to_item(component.accessory),
-            id=component.id,
-        )
+        # using MISSING as accessory so we can create the new one with the parent set
+        self = cls(id=component.id, accessory=MISSING)
+        self.accessory = _component_to_item(component.accessory, self)
+        self.id = component.id
+        self._children = [_component_to_item(c, self) for c in component.children]
+
+        return self
+
+    def to_components(self) -> List[Dict[str, Any]]:
+        components = []
+
+        for component in self._children:
+            components.append(component.to_component_dict())
+        return components
 
     def to_component_dict(self) -> Dict[str, Any]:
         data = {
             'type': self.type.value,
-            'components': [
-                c.to_component_dict()
-                for c in sorted(
-                    self._children,
-                    key=lambda i: i._rendered_row or sys.maxsize,
-                )
-            ],
+            'components': self.to_components(),
             'accessory': self.accessory.to_component_dict(),
         }
         if self.id is not None:

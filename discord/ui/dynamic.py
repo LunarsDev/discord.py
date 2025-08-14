@@ -38,14 +38,12 @@ if TYPE_CHECKING:
     from ..interactions import Interaction
     from ..components import Component
     from ..enums import ComponentType
-    from .view import BaseView
-
-    V = TypeVar('V', bound='BaseView', covariant=True, default=BaseView)
+    from .view import View, LayoutView
 else:
-    V = TypeVar('V', bound='BaseView', covariant=True)
+    View = LayoutView = Any
 
 
-class DynamicItem(Generic[BaseT], Item['BaseView']):
+class DynamicItem(Generic[BaseT], Item[Union[View, LayoutView]]):
     """Represents an item with a dynamic ``custom_id`` that can be used to store state within
     that ``custom_id``.
 
@@ -57,9 +55,10 @@ class DynamicItem(Generic[BaseT], Item['BaseView']):
     and should not be used long term. Their only purpose is to act as a "template"
     for the actual dispatched item.
 
-    When this item is generated, :attr:`view` is set to a regular :class:`View` instance
-    from the original message given from the interaction. This means that custom view
-    subclasses cannot be accessed from this item.
+    When this item is generated, :attr:`view` is set to a regular :class:`View` instance,
+    but to a :class:`LayoutView` if the component was sent with one, this is obtained from
+    the original message given from the interaction. This means that custom view subclasses
+    cannot be accessed from this item.
 
     .. versionadded:: 2.4
 
@@ -144,7 +143,7 @@ class DynamicItem(Generic[BaseT], Item['BaseView']):
     @property
     def custom_id(self) -> str:
         """:class:`str`: The ID of the dynamic item that gets received during an interaction."""
-        return self.item.custom_id
+        return self.item.custom_id  # type: ignore  # This attribute exists for dispatchable items
 
     @custom_id.setter
     def custom_id(self, value: str) -> None:
@@ -154,7 +153,7 @@ class DynamicItem(Generic[BaseT], Item['BaseView']):
         if not self.template.match(value):
             raise ValueError(f'custom_id must match the template {self.template.pattern!r}')
 
-        self.item.custom_id = value
+        self.item.custom_id = value  # type: ignore  # This attribute exists for dispatchable items
         self._provided_custom_id = True
 
     @property
