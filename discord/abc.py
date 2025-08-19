@@ -77,7 +77,7 @@ __all__ = (
 T = TypeVar('T', bound=VoiceProtocol)
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
+    from typing_extensions import Self, Unpack
 
     from .client import Client
     from .user import ClientUser
@@ -112,10 +112,11 @@ if TYPE_CHECKING:
     from .types.snowflake import (
         SnowflakeList,
     )
+    from .permissions import _PermissionOverwriteKwargs
 
     PartialMessageableChannel = Union[TextChannel, VoiceChannel, StageChannel, Thread, DMChannel, PartialMessageable]
     MessageableChannel = Union[PartialMessageableChannel, GroupChannel]
-    SnowflakeTime = Union["Snowflake", datetime]
+    SnowflakeTime = Union['Snowflake', datetime]
 
     class PinnedMessage(Message):
         pinned_at: datetime
@@ -139,7 +140,7 @@ class _PinsIterator:
 
     def __await__(self) -> Generator[Any, None, List[PinnedMessage]]:
         warnings.warn(
-            "`await <channel>.pins()` is deprecated; use `async for message in <channel>.pins()` instead.",
+            '`await <channel>.pins()` is deprecated; use `async for message in <channel>.pins()` instead.',
             DeprecationWarning,
             stacklevel=2,
         )
@@ -422,8 +423,7 @@ class GuildChannel:
 
     if TYPE_CHECKING:
 
-        def __init__(self, *, state: ConnectionState, guild: Guild, data: GuildChannelPayload):
-            ...
+        def __init__(self, *, state: ConnectionState, guild: Guild, data: GuildChannelPayload): ...
 
     def __str__(self) -> str:
         return self.name
@@ -793,7 +793,6 @@ class GuildChannel:
 
         default = self.guild.default_role
         if default is None:
-
             if self._state.self_id == obj.id:
                 return Permissions._user_installed_permissions(in_guild=True)
             else:
@@ -906,8 +905,7 @@ class GuildChannel:
         *,
         overwrite: Optional[Union[PermissionOverwrite, _Undefined]] = ...,
         reason: Optional[str] = ...,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     async def set_permissions(
@@ -915,9 +913,8 @@ class GuildChannel:
         target: Union[Member, Role],
         *,
         reason: Optional[str] = ...,
-        **permissions: Optional[bool],
-    ) -> None:
-        ...
+        **permissions: Unpack[_PermissionOverwriteKwargs],
+    ) -> None: ...
 
     async def set_permissions(
         self,
@@ -925,7 +922,7 @@ class GuildChannel:
         *,
         overwrite: Any = _undefined,
         reason: Optional[str] = None,
-        **permissions: Optional[bool],
+        **permissions: Unpack[_PermissionOverwriteKwargs],
     ) -> None:
         r"""|coro|
 
@@ -1108,8 +1105,7 @@ class GuildChannel:
         category: Optional[Snowflake] = MISSING,
         sync_permissions: bool = MISSING,
         reason: Optional[str] = MISSING,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     async def move(
@@ -1120,8 +1116,7 @@ class GuildChannel:
         category: Optional[Snowflake] = MISSING,
         sync_permissions: bool = MISSING,
         reason: str = MISSING,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     async def move(
@@ -1132,8 +1127,7 @@ class GuildChannel:
         category: Optional[Snowflake] = MISSING,
         sync_permissions: bool = MISSING,
         reason: str = MISSING,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     async def move(
@@ -1144,8 +1138,7 @@ class GuildChannel:
         category: Optional[Snowflake] = MISSING,
         sync_permissions: bool = MISSING,
         reason: str = MISSING,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     async def move(self, **kwargs: Any) -> None:
         """|coro|
@@ -1427,8 +1420,7 @@ class Messageable:
         view: LayoutView,
         suppress_embeds: bool = ...,
         silent: bool = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     @overload
     async def send(
@@ -1443,8 +1435,7 @@ class Messageable:
         view: LayoutView,
         suppress_embeds: bool = ...,
         silent: bool = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     @overload
     async def send(
@@ -1464,8 +1455,7 @@ class Messageable:
         suppress_embeds: bool = ...,
         silent: bool = ...,
         poll: Poll = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     @overload
     async def send(
@@ -1485,8 +1475,7 @@ class Messageable:
         suppress_embeds: bool = ...,
         silent: bool = ...,
         poll: Poll = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     @overload
     async def send(
@@ -1506,8 +1495,7 @@ class Messageable:
         suppress_embeds: bool = ...,
         silent: bool = ...,
         poll: Poll = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     @overload
     async def send(
@@ -1527,8 +1515,7 @@ class Messageable:
         suppress_embeds: bool = ...,
         silent: bool = ...,
         poll: Poll = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     async def send(
         self,
@@ -2030,7 +2017,7 @@ class Messageable:
             if limit is None:
                 raise ValueError('history does not support around with limit=None')
             if limit > 101:
-                raise ValueError("history max limit 101 when specifying around parameter")
+                raise ValueError('history max limit 101 when specifying around parameter')
 
             # Strange Discord quirk
             limit = 100 if limit == 101 else limit

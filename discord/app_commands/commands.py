@@ -61,7 +61,7 @@ from ..permissions import Permissions
 from ..utils import resolve_annotation, MISSING, is_inside_class, maybe_coroutine, async_all, _shorten, _to_kebab_case
 
 if TYPE_CHECKING:
-    from typing_extensions import ParamSpec, Concatenate
+    from typing_extensions import ParamSpec, Concatenate, Unpack
     from ..interactions import Interaction
     from ..abc import Snowflake
     from .namespace import Namespace
@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     # However, for type hinting purposes it's unfortunately necessary for one to
     # reference the other to prevent type checking errors in callbacks
     from discord.ext import commands
+    from discord.permissions import _PermissionsKwargs
 
     ErrorFunc = Callable[[Interaction, AppCommandError], Coroutine[Any, Any, None]]
 
@@ -218,7 +219,7 @@ def validate_context_menu_name(name: str) -> str:
 
 
 def validate_auto_complete_callback(
-    callback: AutocompleteCallback[GroupT, ChoiceT]
+    callback: AutocompleteCallback[GroupT, ChoiceT],
 ) -> AutocompleteCallback[GroupT, ChoiceT]:
     # This function needs to ensure the following is true:
     # If self.foo is passed then don't pass command.binding to the callback
@@ -1490,9 +1491,9 @@ class Group:
     __discord_app_commands_installation_types__: Optional[AppInstallationType] = MISSING
     __discord_app_commands_default_permissions__: Optional[Permissions] = MISSING
     __discord_app_commands_has_module__: bool = False
-    __discord_app_commands_error_handler__: Optional[
-        Callable[[Interaction, AppCommandError], Coroutine[Any, Any, None]]
-    ] = None
+    __discord_app_commands_error_handler__: Optional[Callable[[Interaction, AppCommandError], Coroutine[Any, Any, None]]] = (
+        None
+    )
 
     def __init_subclass__(
         cls,
@@ -2483,13 +2484,11 @@ def check(predicate: Check) -> Callable[[T], T]:
 
 
 @overload
-def guild_only(func: None = ...) -> Callable[[T], T]:
-    ...
+def guild_only(func: None = ...) -> Callable[[T], T]: ...
 
 
 @overload
-def guild_only(func: T) -> T:
-    ...
+def guild_only(func: T) -> T: ...
 
 
 def guild_only(func: Optional[T] = None) -> Union[T, Callable[[T], T]]:
@@ -2540,13 +2539,11 @@ def guild_only(func: Optional[T] = None) -> Union[T, Callable[[T], T]]:
 
 
 @overload
-def private_channel_only(func: None = ...) -> Callable[[T], T]:
-    ...
+def private_channel_only(func: None = ...) -> Callable[[T], T]: ...
 
 
 @overload
-def private_channel_only(func: T) -> T:
-    ...
+def private_channel_only(func: T) -> T: ...
 
 
 def private_channel_only(func: Optional[T] = None) -> Union[T, Callable[[T], T]]:
@@ -2597,13 +2594,11 @@ def private_channel_only(func: Optional[T] = None) -> Union[T, Callable[[T], T]]
 
 
 @overload
-def dm_only(func: None = ...) -> Callable[[T], T]:
-    ...
+def dm_only(func: None = ...) -> Callable[[T], T]: ...
 
 
 @overload
-def dm_only(func: T) -> T:
-    ...
+def dm_only(func: T) -> T: ...
 
 
 def dm_only(func: Optional[T] = None) -> Union[T, Callable[[T], T]]:
@@ -2696,13 +2691,11 @@ def allowed_contexts(guilds: bool = MISSING, dms: bool = MISSING, private_channe
 
 
 @overload
-def guild_install(func: None = ...) -> Callable[[T], T]:
-    ...
+def guild_install(func: None = ...) -> Callable[[T], T]: ...
 
 
 @overload
-def guild_install(func: T) -> T:
-    ...
+def guild_install(func: T) -> T: ...
 
 
 def guild_install(func: Optional[T] = None) -> Union[T, Callable[[T], T]]:
@@ -2747,13 +2740,11 @@ def guild_install(func: Optional[T] = None) -> Union[T, Callable[[T], T]]:
 
 
 @overload
-def user_install(func: None = ...) -> Callable[[T], T]:
-    ...
+def user_install(func: None = ...) -> Callable[[T], T]: ...
 
 
 @overload
-def user_install(func: T) -> T:
-    ...
+def user_install(func: T) -> T: ...
 
 
 def user_install(func: Optional[T] = None) -> Union[T, Callable[[T], T]]:
@@ -2840,7 +2831,7 @@ def allowed_installs(
     return inner
 
 
-def default_permissions(perms_obj: Optional[Permissions] = None, /, **perms: bool) -> Callable[[T], T]:
+def default_permissions(perms_obj: Optional[Permissions] = None, /, **perms: Unpack[_PermissionsKwargs]) -> Callable[[T], T]:
     r"""A decorator that sets the default permissions needed to execute this command.
 
     When this decorator is used, by default users must have these permissions to execute the command.
