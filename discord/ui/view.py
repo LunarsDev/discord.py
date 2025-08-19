@@ -84,7 +84,7 @@ if TYPE_CHECKING:
 
     from ..interactions import Interaction
     from ..message import Message
-    from ..types.components import ComponentBase as ComponentBasePayload, Component as ComponentPayload
+    from ..types.components import ComponentBase as ComponentBasePayload
     from ..types.interactions import ModalSubmitComponentInteractionData as ModalSubmitComponentInteractionDataPayload
     from ..state import ConnectionState
     from .modal import Modal
@@ -319,14 +319,23 @@ class BaseView:
 
         self.__timeout = value
 
+    def _add_count(self, value: int) -> None:
+        self._total_children = max(0, self._total_children + value)
+
     @property
     def children(self) -> List[Item[Self]]:
         """List[:class:`Item`]: The list of children attached to this view."""
         return self._children.copy()
 
+    @property
+    def total_children_count(self) -> int:
+        """:class:`int`: The total number of children in this view, including those from nested items."""
+        return self._total_children
+
     @classmethod
     def from_message(cls, message: Message, /, *, timeout: Optional[float] = 180.0) -> Union[View, LayoutView]:
-        """Converts a message's components into a :class:`View`.
+        """Converts a message's components into a :class:`View`
+        or :class:`LayoutView`.
 
         The :attr:`.Message.components` of a message are read-only
         and separate types from those in the ``discord.ui`` namespace.
@@ -371,7 +380,7 @@ class BaseView:
                     if item._is_v2():
                         raise ValueError(f'{item.__class__.__name__} cannot be added to {view.__class__.__name__}')
                     view.add_item(item)
-                    row += 1
+                row += 1
                 continue
 
             item = _component_to_item(component)
@@ -418,10 +427,7 @@ class BaseView:
         if item._has_children():
             added += len(tuple(item.walk_children()))  # type: ignore
 
-        if self._is_layout() and self._total_children + added > 40:
-            raise ValueError('maximum number of children exceeded')
-
-        self._total_children += added
+        self._add_count(added)
         self._children.append(item)
         return self
 
@@ -445,11 +451,7 @@ class BaseView:
             removed = 1
             if item._has_children():
                 removed += len(tuple(item.walk_children()))  # type: ignore
-
-            if self._total_children - removed < 0:
-                self._total_children = 0
-            else:
-                self._total_children -= removed
+            self._add_count(-removed)
 
         return self
 
@@ -687,12 +689,7 @@ class View(BaseView):
     if TYPE_CHECKING:
 
         @classmethod
-        def from_dict(cls, data: List[ComponentPayload], *, timeout: Optional[float] = 180.0) -> View:
-            ...
-
-        @classmethod
-        def from_message(cls, message: Message, /, *, timeout: Optional[float] = 180.0) -> View:
-            ...
+        def from_message(cls, message: Message, /, *, timeout: Optional[float] = 180.0) -> View: ...
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
@@ -768,6 +765,9 @@ class LayoutView(BaseView):
 
     This object must be inherited to create a UI within Discord.
 
+    This differs from a :class:`View` in that it supports all component types
+    and uses what Discord refers to as "v2 components".
+
     You can find usage examples in the :resource:`repository <examples>`
 
     .. versionadded:: 2.6
@@ -782,12 +782,7 @@ class LayoutView(BaseView):
     if TYPE_CHECKING:
 
         @classmethod
-        def from_dict(cls, data: List[ComponentPayload], *, timeout: Optional[float] = 180.0) -> LayoutView:
-            ...
-
-        @classmethod
-        def from_message(cls, message: Message, /, *, timeout: Optional[float] = 180.0) -> LayoutView:
-            ...
+        def from_message(cls, message: Message, /, *, timeout: Optional[float] = 180.0) -> LayoutView: ...
 
     def __init__(self, *, timeout: Optional[float] = 180.0) -> None:
         super().__init__(timeout=timeout)
@@ -818,6 +813,12 @@ class LayoutView(BaseView):
     def _is_layout(self) -> bool:
         return True
 
+    def _add_count(self, value: int) -> None:
+        if self._total_children + value > 40:
+            raise ValueError('maximum number of children exceeded (40)')
+
+        self._total_children = max(0, self._total_children + value)
+
     def to_components(self):
         components: List[Dict[str, Any]] = []
         for i in self._children:
@@ -830,6 +831,15 @@ class LayoutView(BaseView):
             raise ValueError('maximum number of children exceeded (40)')
         super().add_item(item)
         return self
+
+    def content_length(self) -> int:
+        """:class:`int`: Returns the total length of all text content in the view's items.
+
+        A view is allowed to have a maximum of 4000 display characters across all its items.
+        """
+        from .text_display import TextDisplay
+
+        return sum(len(item.content) for item in self.walk_children() if isinstance(item, TextDisplay))
 
 
 class ViewStore:
@@ -1034,7 +1044,7 @@ class ViewStore:
     ) -> None:
         modal = self._modals.get(custom_id)
         if modal is None:
-            _log.debug("Modal interaction referencing unknown custom_id %s. Discarding", custom_id)
+            _log.debug('Modal interaction referencing unknown custom_id %s. Discarding', custom_id)
             return
 
         self.add_task(modal._dispatch_submit(interaction, components))

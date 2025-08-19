@@ -21,6 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
+
 from __future__ import annotations
 
 import array
@@ -41,7 +42,6 @@ from typing import (
     Iterator,
     List,
     Literal,
-    Mapping,
     NamedTuple,
     Optional,
     Protocol,
@@ -68,13 +68,12 @@ import re
 import os
 import sys
 import types
+import typing
 import warnings
 import logging
+import zlib
 
 import yarl
-
-if TYPE_CHECKING:
-    from .user import _UserTag
 
 try:
     import orjson  # type: ignore
@@ -83,6 +82,12 @@ except ModuleNotFoundError:
 else:
     HAS_ORJSON = True
 
+try:
+    import zstandard  # type: ignore
+except ImportError:
+    _HAS_ZSTD = False
+else:
+    _HAS_ZSTD = True
 
 __all__ = (
     'oauth_url',
@@ -100,11 +105,10 @@ __all__ = (
     'format_dt',
     'MISSING',
     'setup_logging',
-    'user_has_nitro',
 )
 
 DISCORD_EPOCH = 1420070400000
-DEFAULT_FILE_SIZE_LIMIT_BYTES = 26214400
+DEFAULT_FILE_SIZE_LIMIT_BYTES = 10485760
 
 
 class _MissingSentinel:
@@ -151,8 +155,10 @@ if TYPE_CHECKING:
     from .invite import Invite
     from .template import Template
 
-    class _RequestLike(Protocol):
-        headers: Mapping[str, Any]
+    class _DecompressionContext(Protocol):
+        COMPRESSION_TYPE: str
+
+        def decompress(self, data: bytes, /) -> str | None: ...
 
     P = ParamSpec('P')
 
@@ -179,12 +185,10 @@ class CachedSlotProperty(Generic[T, T_co]):
         self.__doc__ = getattr(function, '__doc__')
 
     @overload
-    def __get__(self, instance: None, owner: Type[T]) -> CachedSlotProperty[T, T_co]:
-        ...
+    def __get__(self, instance: None, owner: Type[T]) -> CachedSlotProperty[T, T_co]: ...
 
     @overload
-    def __get__(self, instance: T, owner: Type[T]) -> T_co:
-        ...
+    def __get__(self, instance: T, owner: Type[T]) -> T_co: ...
 
     def __get__(self, instance: Optional[T], owner: Type[T]) -> Any:
         if instance is None:
@@ -233,15 +237,13 @@ class SequenceProxy(Sequence[T_co]):
         return self.__proxied
 
     def __repr__(self) -> str:
-        return f"SequenceProxy({self.__proxied!r})"
+        return f'SequenceProxy({self.__proxied!r})'
 
     @overload
-    def __getitem__(self, idx: SupportsIndex) -> T_co:
-        ...
+    def __getitem__(self, idx: SupportsIndex) -> T_co: ...
 
     @overload
-    def __getitem__(self, idx: slice) -> List[T_co]:
-        ...
+    def __getitem__(self, idx: slice) -> List[T_co]: ...
 
     def __getitem__(self, idx: Union[SupportsIndex, slice]) -> Union[T_co, List[T_co]]:
         return self.__copied[idx]
@@ -266,18 +268,15 @@ class SequenceProxy(Sequence[T_co]):
 
 
 @overload
-def parse_time(timestamp: None) -> None:
-    ...
+def parse_time(timestamp: None) -> None: ...
 
 
 @overload
-def parse_time(timestamp: str) -> datetime.datetime:
-    ...
+def parse_time(timestamp: str) -> datetime.datetime: ...
 
 
 @overload
-def parse_time(timestamp: Optional[str]) -> Optional[datetime.datetime]:
-    ...
+def parse_time(timestamp: Optional[str]) -> Optional[datetime.datetime]: ...
 
 
 def parse_time(timestamp: Optional[str]) -> Optional[datetime.datetime]:
@@ -301,11 +300,11 @@ def deprecated(instead: Optional[str] = None) -> Callable[[Callable[P, T]], Call
         def decorated(*args: P.args, **kwargs: P.kwargs) -> T:
             warnings.simplefilter('always', DeprecationWarning)  # turn off filter
             if instead:
-                fmt = "{0.__name__} is deprecated, use {1} instead."
+                fmt = '{0.__name__} is deprecated, use {1} instead.'
             else:
                 fmt = '{0.__name__} is deprecated.'
 
-            warnings.warn(fmt.format(func, instead), stacklevel=3, category=DeprecationWarning)
+            warnings.warn(fmt.format(func, instead), stacklevel=2, category=DeprecationWarning)
             warnings.simplefilter('default', DeprecationWarning)  # reset filter
             return func(*args, **kwargs)
 
@@ -320,7 +319,7 @@ def oauth_url(
     permissions: Permissions = MISSING,
     guild: Snowflake = MISSING,
     redirect_uri: str = MISSING,
-    scopes: Iterable[str] = MISSING,
+    scopes: Optional[Iterable[str]] = MISSING,
     disable_guild_select: bool = False,
     state: str = MISSING,
 ) -> str:
@@ -362,7 +361,8 @@ def oauth_url(
         The OAuth2 URL for inviting the bot into guilds.
     """
     url = f'https://discord.com/oauth2/authorize?client_id={client_id}'
-    url += '&scope=' + '+'.join(scopes or ('bot', 'applications.commands'))
+    if scopes is not None:
+        url += '&scope=' + '+'.join(scopes or ('bot', 'applications.commands'))
     if permissions is not MISSING:
         url += f'&permissions={permissions.value}'
     if guild is not MISSING:
@@ -439,13 +439,11 @@ async def _afind(predicate: Callable[[T], Any], iterable: AsyncIterable[T], /) -
 
 
 @overload
-def find(predicate: Callable[[T], Any], iterable: AsyncIterable[T], /) -> Coro[Optional[T]]:
-    ...
+def find(predicate: Callable[[T], Any], iterable: AsyncIterable[T], /) -> Coro[Optional[T]]: ...
 
 
 @overload
-def find(predicate: Callable[[T], Any], iterable: Iterable[T], /) -> Optional[T]:
-    ...
+def find(predicate: Callable[[T], Any], iterable: Iterable[T], /) -> Optional[T]: ...
 
 
 def find(predicate: Callable[[T], Any], iterable: _Iter[T], /) -> Union[Optional[T], Coro[Optional[T]]]:
@@ -525,13 +523,11 @@ async def _aget(iterable: AsyncIterable[T], /, **attrs: Any) -> Optional[T]:
 
 
 @overload
-def get(iterable: AsyncIterable[T], /, **attrs: Any) -> Coro[Optional[T]]:
-    ...
+def get(iterable: AsyncIterable[T], /, **attrs: Any) -> Coro[Optional[T]]: ...
 
 
 @overload
-def get(iterable: Iterable[T], /, **attrs: Any) -> Optional[T]:
-    ...
+def get(iterable: Iterable[T], /, **attrs: Any) -> Optional[T]: ...
 
 
 def get(iterable: _Iter[T], /, **attrs: Any) -> Union[Optional[T], Coro[Optional[T]]]:
@@ -614,7 +610,7 @@ def _get_as_snowflake(data: Any, key: str) -> Optional[int]:
 
 
 def _get_mime_type_for_image(data: bytes):
-    if data.startswith(b'\x89\x50\x4E\x47\x0D\x0A\x1A\x0A'):
+    if data.startswith(b'\x89\x50\x4e\x47\x0d\x0a\x1a\x0a'):
         return 'image/png'
     elif data[0:3] == b'\xff\xd8\xff' or data[6:10] in (b'JFIF', b'Exif'):
         return 'image/jpeg'
@@ -626,9 +622,19 @@ def _get_mime_type_for_image(data: bytes):
         raise ValueError('Unsupported image type given')
 
 
-def _bytes_to_base64_data(data: bytes) -> str:
+def _get_mime_type_for_audio(data: bytes):
+    if data.startswith(b'\x49\x44\x33') or data.startswith(b'\xff\xfb'):
+        return 'audio/mpeg'
+    else:
+        raise ValueError('Unsupported audio type given')
+
+
+def _bytes_to_base64_data(data: bytes, *, audio: bool = False) -> str:
     fmt = 'data:{mime};base64,{data}'
-    mime = _get_mime_type_for_image(data)
+    if audio:
+        mime = _get_mime_type_for_audio(data)
+    else:
+        mime = _get_mime_type_for_image(data)
     b64 = b64encode(data).decode('ascii')
     return fmt.format(mime=mime, data=b64)
 
@@ -696,13 +702,13 @@ async def maybe_coroutine(f: MaybeAwaitableFunc[P, T], *args: P.args, **kwargs: 
     if _isawaitable(value):
         return await value
     else:
-        return value  # type: ignore
+        return value
 
 
 async def async_all(
     gen: Iterable[Union[T, Awaitable[T]]],
     *,
-    check: Callable[[Union[T, Awaitable[T]]], TypeGuard[Awaitable[T]]] = _isawaitable,
+    check: Callable[[Union[T, Awaitable[T]]], TypeGuard[Awaitable[T]]] = _isawaitable,  # type: ignore
 ) -> bool:
     for elem in gen:
         if check(elem):
@@ -725,7 +731,7 @@ async def sane_wait_for(futures: Iterable[Awaitable[T]], *, timeout: Optional[fl
 def get_slots(cls: Type[Any]) -> Iterator[str]:
     for mro in reversed(cls.__mro__):
         try:
-            yield from mro.__slots__  # type: ignore
+            yield from mro.__slots__
         except AttributeError:
             continue
 
@@ -738,13 +744,11 @@ def compute_timedelta(dt: datetime.datetime) -> float:
 
 
 @overload
-async def sleep_until(when: datetime.datetime, result: T) -> T:
-    ...
+async def sleep_until(when: datetime.datetime, result: T) -> T: ...
 
 
 @overload
-async def sleep_until(when: datetime.datetime) -> None:
-    ...
+async def sleep_until(when: datetime.datetime) -> None: ...
 
 
 async def sleep_until(when: datetime.datetime, result: Optional[T] = None) -> Optional[T]:
@@ -805,8 +809,7 @@ class SnowflakeList(_SnowflakeListBase):
 
     if TYPE_CHECKING:
 
-        def __init__(self, data: Iterable[int], *, is_sorted: bool = False):
-            ...
+        def __init__(self, data: Iterable[int], *, is_sorted: bool = False): ...
 
     def __new__(cls, data: Iterable[int], *, is_sorted: bool = False) -> Self:
         return array.array.__new__(cls, 'Q', data if is_sorted else sorted(data))  # type: ignore
@@ -851,6 +854,12 @@ def resolve_invite(invite: Union[Invite, str]) -> ResolvedInvite:
     invite: Union[:class:`~discord.Invite`, :class:`str`]
         The invite.
 
+    Raises
+    -------
+    ValueError
+        The invite is not a valid Discord invite, e.g. is not a URL
+        or does not contain alphanumeric characters.
+
     Returns
     --------
     :class:`.ResolvedInvite`
@@ -870,7 +879,12 @@ def resolve_invite(invite: Union[Invite, str]) -> ResolvedInvite:
             event_id = url.query.get('event')
 
             return ResolvedInvite(code, int(event_id) if event_id else None)
-    return ResolvedInvite(invite, None)
+
+        allowed_characters = r'[a-zA-Z0-9\-_]+'
+        if not re.fullmatch(allowed_characters, invite):
+            raise ValueError('Invite contains characters that are not allowed')
+
+        return ResolvedInvite(invite, None)
 
 
 def resolve_template(code: Union[Template, str]) -> str:
@@ -905,11 +919,11 @@ _MARKDOWN_ESCAPE_SUBREGEX = '|'.join(r'\{0}(?=([\s\S]*((?<!\{0})\{0})))'.format(
 
 _MARKDOWN_ESCAPE_COMMON = r'^>(?:>>)?\s|\[.+\]\(.+\)|^#{1,3}|^\s*-'
 
-_MARKDOWN_ESCAPE_REGEX = re.compile(fr'(?P<markdown>{_MARKDOWN_ESCAPE_SUBREGEX}|{_MARKDOWN_ESCAPE_COMMON})', re.MULTILINE)
+_MARKDOWN_ESCAPE_REGEX = re.compile(rf'(?P<markdown>{_MARKDOWN_ESCAPE_SUBREGEX}|{_MARKDOWN_ESCAPE_COMMON})', re.MULTILINE)
 
 _URL_REGEX = r'(?P<url><[^: >]+:\/[^ >]+>|(?:https?|steam):\/\/[^\s<]+[^<.,:;\"\'\]\s])'
 
-_MARKDOWN_STOCK_REGEX = fr'(?P<markdown>[_\\~|\*`]|{_MARKDOWN_ESCAPE_COMMON})'
+_MARKDOWN_STOCK_REGEX = rf'(?P<markdown>[_\\~|\*`]|{_MARKDOWN_ESCAPE_COMMON})'
 
 
 def remove_markdown(text: str, *, ignore_links: bool = True) -> str:
@@ -1044,13 +1058,11 @@ async def _achunk(iterator: AsyncIterable[T], max_size: int) -> AsyncIterator[Li
 
 
 @overload
-def as_chunks(iterator: AsyncIterable[T], max_size: int) -> AsyncIterator[List[T]]:
-    ...
+def as_chunks(iterator: AsyncIterable[T], max_size: int) -> AsyncIterator[List[T]]: ...
 
 
 @overload
-def as_chunks(iterator: Iterable[T], max_size: int) -> Iterator[List[T]]:
-    ...
+def as_chunks(iterator: Iterable[T], max_size: int) -> Iterator[List[T]]: ...
 
 
 def as_chunks(iterator: _Iter[T], max_size: int) -> _Iter[List[T]]:
@@ -1084,6 +1096,7 @@ def as_chunks(iterator: _Iter[T], max_size: int) -> _Iter[List[T]]:
 
 
 PY_310 = sys.version_info >= (3, 10)
+PY_312 = sys.version_info >= (3, 12)
 
 
 def flatten_literal_params(parameters: Iterable[Any]) -> Tuple[Any, ...]:
@@ -1091,7 +1104,7 @@ def flatten_literal_params(parameters: Iterable[Any]) -> Tuple[Any, ...]:
     literal_cls = type(Literal[0])
     for p in parameters:
         if isinstance(p, literal_cls):
-            params.extend(p.__args__)
+            params.extend(p.__args__)  # type: ignore
         else:
             params.append(p)
     return tuple(params)
@@ -1121,6 +1134,16 @@ def evaluate_annotation(
         evaluated = evaluate_annotation(eval(tp, globals, locals), globals, locals, cache)
         cache[tp] = evaluated
         return evaluated
+
+    if PY_312 and getattr(tp.__repr__, '__objclass__', None) is typing.TypeAliasType:  # type: ignore
+        temp_locals = dict(**locals, **{t.__name__: t for t in tp.__type_params__})
+        annotation = evaluate_annotation(tp.__value__, globals, temp_locals, cache.copy())
+        if hasattr(tp, '__args__'):
+            annotation = annotation[tp.__args__]
+        return annotation
+
+    if hasattr(tp, '__supertype__'):
+        return evaluate_annotation(tp.__supertype__, globals, locals, cache)
 
     if hasattr(tp, '__metadata__'):
         # Annotated[X, Y] can access Y via __metadata__
@@ -1264,7 +1287,6 @@ def stream_supports_colour(stream: Any) -> bool:
 
 
 class _ColourFormatter(logging.Formatter):
-
     # ANSI codes are a bit weird to decipher if you're unfamiliar with them, so here's a refresher
     # It starts off with a format like \x1b[XXXm where XXX is a semicolon separated list of commands
     # The important ones here relate to colour.
@@ -1399,46 +1421,104 @@ def _human_join(seq: Sequence[str], /, *, delimiter: str = ', ', final: str = 'o
 
     return delimiter.join(seq[:-1]) + f' {final} {seq[-1]}'
 
-def user_has_nitro(user: _UserTag, /) -> bool:
-    from .user import User
-    from .member import Member
-    from .enums import ActivityType, PremiumType
-    from .partial_emoji import PartialEmoji
-    from .activity import CustomActivity
 
-    if not isinstance(user, (User, Member)):
-        raise TypeError('user argument must be a User or Member')
+if _HAS_ZSTD:
 
-    if user.premium_type not in (PremiumType.keyerror, PremiumType.none):
-        return True
+    class _ZstdDecompressionContext:
+        __slots__ = ('context',)
 
-    def custom_status_check(member: Member, /) -> bool:
-        ca: CustomActivity = find(lambda activity: activity.type is ActivityType.custom, member.activities)  # type: ignore
-        if ca is None:
-            return False
+        COMPRESSION_TYPE: str = 'zstd-stream'
 
-        return isinstance(ca.emoji, PartialEmoji) and ca.emoji.is_custom_emoji()
+        def __init__(self) -> None:
+            decompressor = zstandard.ZstdDecompressor()
+            self.context = decompressor.decompressobj()
 
-    def user_checks(user: Union[Member, User], /) -> bool:
-        return any(
-            check not in (False, None)
-            for check in (
-                user.banner,
-                user.avatar_decoration,
-                user.avatar.is_animated() if user.avatar else None,
-            )
-        )
+        def decompress(self, data: bytes, /) -> str | None:
+            # Each WS message is a complete gateway message
+            return self.context.decompress(data).decode('utf-8')
 
-    def member_checks(member: Member, /) -> bool:
-        return any(
-            check not in (False, None)
-            for check in (
-                member.premium_since,
-                custom_status_check(member),
-            )
-        )
+    _ActiveDecompressionContext: Type[_DecompressionContext] = _ZstdDecompressionContext
+else:
 
-    if isinstance(user, User):
-        return user_checks(user)
+    class _ZlibDecompressionContext:
+        __slots__ = ('context', 'buffer')
 
-    return user_checks(user) or member_checks(user)
+        COMPRESSION_TYPE: str = 'zlib-stream'
+
+        def __init__(self) -> None:
+            self.buffer: bytearray = bytearray()
+            self.context = zlib.decompressobj()
+
+        def decompress(self, data: bytes, /) -> str | None:
+            self.buffer.extend(data)
+
+            # Check whether ending is Z_SYNC_FLUSH
+            if len(data) < 4 or data[-4:] != b'\x00\x00\xff\xff':
+                return
+
+            msg = self.context.decompress(self.buffer)
+            self.buffer = bytearray()
+
+            return msg.decode('utf-8')
+
+    _ActiveDecompressionContext: Type[_DecompressionContext] = _ZlibDecompressionContext
+
+
+def _format_call_duration(duration: datetime.timedelta) -> str:
+    seconds = duration.total_seconds()
+
+    minutes_s = 60
+    hours_s = minutes_s * 60
+    days_s = hours_s * 24
+    # Discord uses approx. 1/12 of 365.25 days (avg. days per year)
+    months_s = days_s * 30.4375
+    years_s = months_s * 12
+
+    threshold_s = 45
+    threshold_m = 45
+    threshold_h = 21.5
+    threshold_d = 25.5
+    threshold_M = 10.5
+
+    if seconds < threshold_s:
+        formatted = 'a few seconds'
+    elif seconds < (threshold_m * minutes_s):
+        minutes = round(seconds / minutes_s)
+        if minutes == 1:
+            formatted = 'a minute'
+        else:
+            formatted = f'{minutes} minutes'
+    elif seconds < (threshold_h * hours_s):
+        hours = round(seconds / hours_s)
+        if hours == 1:
+            formatted = 'an hour'
+        else:
+            formatted = f'{hours} hours'
+    elif seconds < (threshold_d * days_s):
+        days = round(seconds / days_s)
+        if days == 1:
+            formatted = 'a day'
+        else:
+            formatted = f'{days} days'
+    elif seconds < (threshold_M * months_s):
+        months = round(seconds / months_s)
+        if months == 1:
+            formatted = 'a month'
+        else:
+            formatted = f'{months} months'
+    else:
+        years = round(seconds / years_s)
+        if years == 1:
+            formatted = 'a year'
+        else:
+            formatted = f'{years} years'
+
+    return formatted
+
+
+class _RawReprMixin:
+    __slots__: Tuple[str, ...] = ()
+
+    def __repr__(self) -> str:
+        value = ' '.join(f'{attr}={getattr(self, attr)!r}' for attr in self.__slots__)
+        return f'<{self.__class__.__name__} {value}>'

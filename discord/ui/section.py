@@ -21,6 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, Generator, List, Literal, Optional, TypeVar, Union, ClassVar
@@ -56,6 +57,11 @@ class Section(Item[V]):
         The section accessory.
     id: Optional[:class:`int`]
         The ID of this component. This must be unique across the view.
+
+    Attributes
+    ----------
+    accessory: :class:`Item`
+        The section accessory.
     """
 
     __item_repr_attributes__ = (
@@ -128,6 +134,12 @@ class Section(Item[V]):
     def _has_children(self):
         return True
 
+    def content_length(self) -> int:
+        """:class:`int`: Returns the total length of all text content in this section."""
+        from .text_display import TextDisplay
+
+        return sum(len(item.content) for item in self._children if isinstance(item, TextDisplay))
+
     def add_item(self, item: Union[str, Item[Any]]) -> Self:
         """Adds an item to this section.
 
@@ -145,22 +157,23 @@ class Section(Item[V]):
         TypeError
             An :class:`Item` or :class:`str` was not passed.
         ValueError
-            Maximum number of children has been exceeded (3).
+            Maximum number of children has been exceeded (3) or (40)
+            for the entire view.
         """
 
         if len(self._children) >= 3:
-            raise ValueError('maximum number of children exceeded')
+            raise ValueError('maximum number of children exceeded (3)')
 
         if not isinstance(item, (Item, str)):
             raise TypeError(f'expected Item or str not {item.__class__.__name__}')
+
+        if self._view:
+            self._view._add_count(1)
 
         item = item if isinstance(item, Item) else TextDisplay(item)
         item._update_view(self.view)
         item._parent = self
         self._children.append(item)
-
-        if self._view:
-            self._view._total_children += 1
 
         return self
 
@@ -182,7 +195,7 @@ class Section(Item[V]):
             pass
         else:
             if self._view:
-                self._view._total_children -= 1
+                self._view._add_count(-1)
 
         return self
 
@@ -212,8 +225,8 @@ class Section(Item[V]):
         This function returns the class instance to allow for fluent-style
         chaining.
         """
-        if self._view and self._view._is_layout():
-            self._view._total_children -= len(self._children)  # we don't count the accessory because it is required
+        if self._view:
+            self._view._add_count(-len(self._children))  # we don't count the accessory because it is required
 
         self._children.clear()
         return self
